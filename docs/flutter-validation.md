@@ -21,11 +21,11 @@
 | Linux FFmpeg 集成 | 真实 Flutter 窗口中生成视频/音频、合并并强制解码两条轨道，通过 |
 | Linux 凭据集成 | 独立 D-Bus 和临时系统密钥环中，实际写入、读取、删除测试通过；未操作用户原有凭据 |
 | Linux Release | x64 发布包构建通过；真实发布程序启动、显示完整界面及密钥环超时提示通过 |
-| Android | arm64-v8a、armeabi-v7a、x86_64 三种 Release APK 已构建；开发签名验证和 ZIP 16 KiB 对齐检查通过；最低 API 24、目标 API 36；尚无设备运行验证 |
-| Windows | 工程、PowerShell 打包和 Windows CI 已准备；当前 Linux 主机不能执行 Windows 桌面编译，尚无 Windows 成品 |
+| Android | arm64-v8a、armeabi-v7a、x86_64 三种 Release APK 在本地和 CI 均构建通过；本地 APK 开发签名验证和 ZIP 16 KiB 对齐检查通过；最低 API 24、目标 API 36；尚无设备运行验证 |
+| Windows | `windows-2022` runner 上原生窗口、FFmpeg 音视频合并与双轨解码测试通过；x64 Release ZIP 已生成并下载，ZIP CRC、PE 架构、exe/DLL/资源完整性检查通过 |
 | Web | Release 编译通过；Chrome 桌面/360px 窄屏可渲染，无 JavaScript 异常；原生下载和扫码登录在预览中禁用 |
 | B站真实请求 | 当前出口对公开视频接口返回 HTTP 412；浏览器接口请求另被 CORS 拒绝，未完成真实账号登录/视频下载验证 |
-| GitHub | 已获用户授权推送 `flutter/migration` 并运行 Actions，远程结果待记录 |
+| GitHub | `flutter/migration` 已推送；源码提交 `dcea31b94254cef3af8890b0e6b01f8f91ae23ed`；Windows/Linux/Android/Web 四个 CI 任务全部通过 |
 
 ## 已定位并修复的实际问题
 
@@ -62,8 +62,8 @@ npm run test:web
 
 - Android APK 使用开发签名，适合安装测试，正式分发前需配置自己的发布签名。
 - Android 尚未验证真机上的扫码、系统目录授权、合并和文件导出；下载需要应用在前台。APK 静态校验不能替代 16 KiB 页大小设备实测。
-- Windows 必须在 Windows 主机上构建和运行验证；CI 配置文件不代表已经获得 exe。
-- Linux 包在 Ubuntu 26.04 x64 上构建/验证，需要 GTK 3、libsecret、JSON-GLib；尚未证明兼容更旧发行版。CI 指定 Ubuntu 24.04 构建，但尚未运行。
+- Windows 已完成 CI 原生集成测试与 Release 编译；真实用户设备上的扫码登录和 B站下载仍待验证。解压时必须保留完整目录中的 DLL 和 `data/`。
+- Linux 本地包在 Ubuntu 26.04 x64 上构建/验证；CI 的 Ubuntu 24.04 构建与原生测试也已通过。运行需要 GTK 3、libsecret、JSON-GLib；尚未证明兼容更旧发行版。
 - 当前没有跨重启恢复队列，也没有复用旧版私有自动更新服务；高级定位/脚本弹幕未迁移，普通滚动/顶部/底部弹幕已实现。
 
 平台边界依据：[Flutter 桌面支持](https://docs.flutter.dev/platform-integration/desktop)、[Windows 构建环境](https://docs.flutter.dev/platform-integration/windows/setup)、[Flutter Web FAQ](https://docs.flutter.dev/platform-integration/web/faq)。
@@ -72,12 +72,14 @@ npm run test:web
 
 产物在根目录 `artifacts/`，不纳入 Git：
 
+- `BiliDownloader-windows-x64.zip`：Windows x64 发布包，解压完整目录后运行 `bili_downloader.exe`。
+- `BiliDownloader-linux-x64-ubuntu24.tar.gz`：Ubuntu 24.04 CI 构建并通过原生测试的 Linux x64 包。
 - `BiliDownloader-linux-x64.tar.gz`：解压完整目录后运行 `./bili_downloader`，不能只复制可执行文件。
 - `app-arm64-v8a-release.apk`：常见 64 位 Android 设备。
 - `app-armeabi-v7a-release.apk`：32 位 ARM Android 设备。
 - `app-x86_64-release.apk`：x86_64 Android 环境。
 - `BiliDownloader-web-preview.tar.gz`：静态 Web 可行性预览。
-- `SHA256SUMS`：上述五份产物的 SHA-256 校验值。
-- `android-validation.json`、`web-probe.json` 和 `*-desktop.png` / `web-mobile.png`：本次静态校验与浏览器/桌面截图证据。
+- `SHA256SUMS`：本地发布产物的 SHA-256 校验值。
+- `android-validation.json`、`windows-validation.json`、`web-probe.json` 和 `*-desktop.png` / `web-mobile.png`：本次静态校验与浏览器/桌面截图证据。
 
-Windows 目前没有编译产物。远程构建方案是推送到独立的 `flutter/migration` 分支触发 Actions，用户已确认；当前 GitHub OAuth 凭据未包含 `workflow` 权限，推送时需补充授权。没有合并到 main 或发布 Release。
+远程源码：[flutter/migration](https://github.com/xiatian410/BiliDownloader/tree/flutter/migration)。构建记录：[Actions #40543068783](https://github.com/xiatian410/BiliDownloader/actions/runs/40543068783)，对应源码提交 `dcea31b94254cef3af8890b0e6b01f8f91ae23ed`，四个平台均通过。CI 产物按工作流配置保留 14 天；Android 的 CI 测试包使用 runner 生成的开发签名，与本地测试包签名可能不同，不应当作正式更新包。GitHub 授权已完成，分支已成功推送；没有合并到 main 或发布 Release。
