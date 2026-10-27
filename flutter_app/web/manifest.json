@@ -1,0 +1,17 @@
+{
+    "name": "BiliDownloader",
+    "short_name": "BiliDownloader",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#f5f5f5",
+    "theme_color": "#fafafa",
+    "description": "BiliDownloader Flutter Web preview",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/app-icon.png",
+            "sizes": "200x200",
+            "type": "image/png"
+        }
+    ]
+}

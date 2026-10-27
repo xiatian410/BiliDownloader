@@ -116,3 +116,7 @@ dmypy.json
 
 /src/Lib/bd_client/const.py
 /starter/*.txt
+
+# Local Flutter build artifacts and test evidence
+/artifacts/
+/scripts/node_modules/

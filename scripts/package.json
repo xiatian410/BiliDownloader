@@ -1,0 +1,6 @@
+{
+  "name": "bilidownloader-browser-checks",
+  "private": true,
+  "scripts": { "test:web": "node test_flutter_web.cjs" },
+  "devDependencies": { "playwright": "1.64.1" }
+}

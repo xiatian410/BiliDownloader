@@ -1,0 +1,76 @@
+name: Flutter builds
+on:
+  workflow_dispatch:
+  push:
+    branches: ['flutter/**']
+    paths: ['flutter_app/**', 'scripts/build_flutter.*', '.github/workflows/flutter-build.yml']
+  pull_request:
+    paths: ['flutter_app/**', 'scripts/build_flutter.*', '.github/workflows/flutter-build.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux
+          - os: windows-2022
+            target: windows
+          - os: ubuntu-24.04
+            target: android
+          - os: ubuntu-24.04
+            target: web
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Flutter 3.47.8
+        shell: bash
+        run: |
+          git clone --depth 1 --branch 3.47.8 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" config --no-analytics
+      - name: Install Linux dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjson-glib-dev patchelf xvfb xauth dbus-x11 gnome-keyring
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Resolve dependencies
+        working-directory: flutter_app
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze and test
+        if: matrix.target == 'linux'
+        working-directory: flutter_app
+        run: |
+          dart format --output=none --set-exit-if-changed lib test integration_test
+          flutter analyze
+          flutter test
+          xvfb-run -a dbus-run-session -- flutter test integration_test/native_smoke_test.dart -d linux
+          bash ../scripts/test_linux_credentials.sh
+      - name: Test Windows window and bundled FFmpeg
+        if: matrix.target == 'windows'
+        working-directory: flutter_app
+        run: flutter test integration_test/native_smoke_test.dart -d windows
+      - name: Build Linux, Android or Web
+        if: matrix.target != 'windows'
+        shell: bash
+        run: bash scripts/build_flutter.sh '${{ matrix.target }}'
+      - name: Build Windows
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: ./scripts/build_flutter.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: BiliDownloader-${{ matrix.target }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
