@@ -67,6 +67,24 @@ class Strings {
     'pausing': ['正在暂停', 'Pausing'],
     'paused': ['已暂停', 'Paused'],
     'merging': ['正在合并音视频', 'Merging video and audio'],
+    'stoppingMerge': ['正在停止合并', 'Stopping merge'],
+    'mergeProgress': ['已处理媒体时长', 'Media time processed'],
+    'mergeStalledStopping': [
+      '合并连续 2 分钟没有进展，正在停止并保留原始音视频。',
+      'No merge progress for 2 minutes. Stopping and keeping source tracks.',
+    ],
+    'mergeStopPending': [
+      '尚未确认合并已停止，暂不能继续；若持续无响应，请重启应用后恢复任务。',
+      'Waiting for merge termination before resuming. If it remains unresponsive, restart the app to recover the task.',
+    ],
+    'mergeStalled': [
+      '合并长时间没有进展，已停止；原始音视频已保留，可以继续重做合并。',
+      'Merge stopped after no progress. Source tracks are preserved; resume to merge again.',
+    ],
+    'mergeUnavailable': [
+      '未找到可运行的 FFmpeg，请检查下载服务的安装。',
+      'FFmpeg could not be started. Check the download service installation.',
+    ],
     'completed': ['下载完成', 'Completed'],
     'failed': ['下载失败', 'Failed'],
     'cancelled': ['已取消', 'Cancelled'],

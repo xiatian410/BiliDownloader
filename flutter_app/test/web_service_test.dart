@@ -342,4 +342,30 @@ void main() {
       expect(contents, isNot(contains(cookie.split('=').last)));
     },
   );
+  test('concurrent repeated submissions create one task and reject different options', () async {
+    final resolved = await post('/api/resolve', {'input': 'av1'});
+    final episode = videoFromJson(resolved.$2).episodes.single;
+    final body = {
+      'requestId': 'same-request',
+      'episode': episode.identity,
+      'options': optionsToJson(
+        const DownloadOptions(directory: '', quality: 80),
+      ),
+    };
+    final responses = await Future.wait([
+      post('/api/jobs', body),
+      post('/api/jobs', body),
+    ]);
+    expect(responses.map((r) => r.$1), everyElement(200));
+    expect(responses[0].$2['id'], responses[1].$2['id']);
+    expect((await post('/api/session', {})).$2['jobs'], hasLength(1));
+    final conflict = await post('/api/jobs', {
+      ...body,
+      'options': optionsToJson(
+        const DownloadOptions(directory: '', quality: 64),
+      ),
+    });
+    expect(conflict.$1, 422);
+    expect((await post('/api/session', {})).$2['jobs'], hasLength(1));
+  });
 }

@@ -205,7 +205,11 @@ class _DownloadsPageState extends State<DownloadsPage> {
         ),
         const SizedBox(height: 8),
         LinearProgressIndicator(
-          value: job.active && job.total == 0
+          value:
+              job.active &&
+                  (job.state == JobState.merging ||
+                      job.stage == 'stoppingMerge' ||
+                      job.total == 0)
               ? null
               : job.total > 0
               ? (job.received / job.total).clamp(0, 1)
@@ -215,6 +219,10 @@ class _DownloadsPageState extends State<DownloadsPage> {
         ),
         const SizedBox(height: 12),
         Text(s(job.active ? job.stage : job.state.name)),
+        if (job.mergeProgress != null && job.active)
+          Text(
+            '${s('mergeProgress')}: ${Duration(milliseconds: job.mergeProgress!.milliseconds).toString().split('.').first} · ${fileSize(job.mergeProgress!.bytes)}',
+          ),
         if (job.error != null)
           StatusBanner(
             '${s(job.error!.key)} ${job.error!.detail}',

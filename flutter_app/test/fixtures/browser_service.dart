@@ -1,6 +1,7 @@
 // Explicit local test fixture; never selected by the production entry point.
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:bili_downloader/core/bili_api.dart';
@@ -10,6 +11,7 @@ import 'package:bili_downloader/server/web_service.dart';
 class BrowserFixtureApi extends BiliApi {
   BrowserFixtureApi(this.origin);
   final String origin;
+  bool failedOnce = false;
   @override
   Future<VideoInfo> resolve(VideoId id, {CancelToken? cancel}) async {
     if (id.value == '412') throw const AppFailure('httpError', '412');
@@ -21,11 +23,11 @@ class BrowserFixtureApi extends BiliApi {
       author: 'Local fixture',
       episodes: [
         Episode(
-          cid: 1001,
-          aid: 1,
+          cid: 1000 + (int.tryParse(id.value) ?? 1),
+          aid: int.tryParse(id.value) ?? 1,
           number: 1,
           name: '视频与音频合并',
-          title: '跨端下载验证',
+          title: '跨端下载验证 · ${id.label}',
           bvid: id.kind == VideoKind.bv ? id.label : '',
         ),
       ],
@@ -37,11 +39,33 @@ class BrowserFixtureApi extends BiliApi {
     Episode episode,
     DownloadOptions options, {
     CancelToken? cancel,
-  }) async => PlayableMedia(
-    qualities: const [Quality(120, '4K'), Quality(80, '1080P')],
-    video: [MediaStream(url: '$origin/video.mp4', quality: 80, codec: 7)],
-    audio: [MediaStream(url: '$origin/audio.m4a', bandwidth: 192000)],
-  );
+  }) async {
+    if (episode.aid == 5 && cancel != null && !failedOnce) {
+      failedOnce = true;
+      throw const AppFailure('httpError', '503');
+    }
+    return PlayableMedia(
+      qualities: const [Quality(120, '4K'), Quality(80, '1080P')],
+      video: [
+        MediaStream(
+          url: '$origin/video.mp4?aid=${episode.aid}',
+          quality: 80,
+          codec: 7,
+        ),
+      ],
+      audio: [
+        MediaStream(
+          url: '$origin/audio.m4a?aid=${episode.aid}',
+          bandwidth: 192000,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<bool> checkLogin() async => cookies.isNotEmpty;
+  @override
+  Future<void> logout() async => cookies = {};
   @override
   Future<LoginQr> generateQr({CancelToken? cancel}) async =>
       const LoginQr('https://example.test/fixture-login', 'fixture-qr');
@@ -97,6 +121,8 @@ Future<void> main() async {
     }
   }
   final media = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final gates = <String, Completer<void>>{};
+  final held = <String>{};
   media.listen((r) async {
     if (!['/video.mp4', '/audio.m4a'].contains(r.uri.path)) {
       r.response.statusCode = 404;
@@ -107,16 +133,51 @@ Future<void> main() async {
     final length = await file.length();
     r.response.headers.set('etag', 'fixture-${r.uri.path}');
     final range = r.headers.value('range');
-    if (range == 'bytes=0-0') {
+    final match = range == null
+        ? null
+        : RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(range);
+    final start = match == null ? 0 : int.parse(match[1]!);
+    final end = match == null || match[2]!.isEmpty
+        ? length - 1
+        : int.parse(match[2]!);
+    final aid = r.uri.queryParameters['aid'] ?? '';
+    if (match != null) {
       r.response.statusCode = 206;
-      r.response.headers.set('content-range', 'bytes 0-0/$length');
-      r.response.contentLength = 1;
-      await r.response.addStream(file.openRead(0, 1));
-    } else {
-      r.response.contentLength = length;
-      await r.response.addStream(file.openRead());
+      r.response.headers.set('content-range', 'bytes $start-$end/$length');
     }
-    await r.response.close();
+    r.response.contentLength = end - start + 1;
+    // Small fixture chunks must reach the downloader before the injected stall.
+    r.response.bufferOutput = false;
+    try {
+      if (range != 'bytes=0-0') {
+        stdout.writeln(
+          'Fixture media: ${jsonEncode({'aid': aid, 'path': r.uri.path, 'start': start})}',
+        );
+      }
+      if (['4', '6'].contains(aid) &&
+          r.uri.path == '/video.mp4' &&
+          start == 0 &&
+          end > 0 &&
+          held.add(aid)) {
+        final gate = gates[aid] = Completer<void>();
+        final half = length ~/ 2;
+        await r.response.addStream(file.openRead(0, half));
+        await r.response.flush();
+        stdout.writeln('Fixture held: $aid');
+        // Bound only the fixture's injected stall; no production delay is added.
+        await gate.future.timeout(const Duration(seconds: 30));
+        await r.response.addStream(file.openRead(half, end + 1));
+      } else {
+        await r.response.addStream(file.openRead(start, end + 1));
+      }
+      await r.response.close();
+    } on SocketException {
+      // Expected when the browser pauses a partly delivered stream.
+    } on HttpException {
+      // Expected when the downloader cancels the response.
+    } on TimeoutException {
+      await r.response.close().catchError((_) {});
+    }
   });
   WebService createService() => WebService(
     webRoot: 'build/web',
@@ -127,6 +188,9 @@ Future<void> main() async {
   await service.start(port: 18744);
   stdout.writeln('Fixture ready: ${service.origin}');
   ProcessSignal.sigterm.watch().listen((_) async {
+    for (final gate in gates.values) {
+      if (!gate.isCompleted) gate.complete();
+    }
     await service.close();
     await media.close(force: true);
     await directory.delete(recursive: true);
@@ -139,6 +203,11 @@ Future<void> main() async {
       service = createService();
       await service.start(port: 18744);
       stdout.writeln('Fixture restarted: ${service.origin}');
+    } else if (command == 'release') {
+      for (final gate in gates.values) {
+        if (!gate.isCompleted) gate.complete();
+      }
+      stdout.writeln('Fixture released:');
     }
   }
 }

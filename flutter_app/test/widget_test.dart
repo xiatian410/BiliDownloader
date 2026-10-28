@@ -9,6 +9,7 @@ import 'package:bili_downloader/app_controller.dart';
 import 'package:bili_downloader/core/download_queue.dart';
 import 'package:bili_downloader/core/download_job.dart';
 import 'package:bili_downloader/core/models.dart';
+import 'package:bili_downloader/ui/widgets.dart';
 
 import 'support.dart';
 
@@ -35,6 +36,25 @@ void main() {
     final font = FontLoader('HarmonyOS Sans SC')
       ..addFont(rootBundle.load('assets/HarmonyOS_Sans_SC_Regular.ttf'));
     await font.load();
+  });
+  testWidgets('status messages are announced as readable live regions', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      const message = '与服务连接中断，可点击继续重新连接。';
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: StatusBanner(message, error: true)),
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(message)),
+        matchesSemantics(label: message, isLiveRegion: true),
+      );
+    } finally {
+      semantics.dispose();
+    }
   });
   testWidgets('locked keyring does not block first frame or late login', (
     tester,

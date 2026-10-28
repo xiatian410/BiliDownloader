@@ -42,12 +42,18 @@ class StatusBanner extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: SelectableText(
-              message,
-              style: TextStyle(
-                color: error
-                    ? colors.onErrorContainer
-                    : colors.onSecondaryContainer,
+            child: Semantics(
+              container: true,
+              liveRegion: true,
+              label: message,
+              excludeSemantics: true,
+              child: SelectableText(
+                message,
+                style: TextStyle(
+                  color: error
+                      ? colors.onErrorContainer
+                      : colors.onSecondaryContainer,
+                ),
               ),
             ),
           ),

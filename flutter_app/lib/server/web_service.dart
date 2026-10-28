@@ -188,12 +188,14 @@ class WebService {
 
   Map<String, dynamic> _job(DownloadJob j) => {
     'id': j.id,
+    'revision': j.revision,
     'state': j.state.name,
     'stage': j.stage,
     'detail': j.detail,
     'received': j.received,
     'total': j.total,
     'actualQuality': j.actualQuality,
+    'merge': j.mergeProgress?.toJson(),
     'error': j.error == null
         ? null
         : {'key': j.error!.key, 'detail': j.error!.detail},
@@ -205,6 +207,7 @@ class WebService {
     ],
   };
   void _emit(_Session s, DownloadJob j) {
+    j.revision++;
     final data = jsonEncode(_job(j));
     for (final socket in s.sockets.toList()) {
       if (socket.readyState == WebSocket.open) socket.add(data);
@@ -505,14 +508,30 @@ class WebService {
         case '/api/jobs':
           final episode = s.episodes[body['episode']];
           if (episode == null) throw const AppFailure('noEpisodes');
-          if (s.jobs.length >= 200) throw const AppFailure('serviceBusy');
+          final requestId = body['requestId'] as String?;
+          if (requestId != null &&
+              !RegExp(r'^[a-zA-Z0-9_-]{1,96}$').hasMatch(requestId)) {
+            throw const AppFailure('invalidResponse');
+          }
           final options = optionsFromJson(
             Map<String, dynamic>.from(body['options']),
             directory: p.join(downloadRoot, s.id),
           );
-          final j = DownloadJob(episode, options);
+          var j = DownloadJob(episode, options)..submissionKey = requestId;
           j.onCheckpoint = () => _persist(s);
           await _transaction(s, () async {
+            if (requestId != null) {
+              for (final previous in s.jobs.values) {
+                if (previous.submissionKey != requestId) continue;
+                if (previous.episode.identity != episode.identity ||
+                    jsonEncode(optionsToJson(previous.options)) !=
+                        jsonEncode(optionsToJson(options))) {
+                  throw const AppFailure('invalidResponse');
+                }
+                j = previous;
+                return;
+              }
+            }
             if (s.jobs.length >= 200) throw const AppFailure('serviceBusy');
             s.jobs[j.id] = j;
             try {
@@ -552,8 +571,9 @@ class WebService {
           if (body['action'] == 'pause') {
             if (j.state == JobState.queued) {
               j.state = JobState.paused;
-            } else if (j.state == JobState.running) {
+            } else if ([JobState.running, JobState.merging].contains(j.state)) {
               j.state = JobState.pausing;
+              j.stage = 'pausing';
               j.token.cancel('pause');
             }
           } else if (body['action'] == 'resume' &&

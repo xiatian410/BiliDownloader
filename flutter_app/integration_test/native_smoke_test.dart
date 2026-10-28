@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -84,6 +86,47 @@ void main() {
           '-',
         ]);
         expect(await File(merged).length(), greaterThan(1000));
+        final cancel = CancelToken();
+        var updates = 0;
+        final peer = mergeWithFfmpeg([
+          '-re',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=600',
+          '-t',
+          '2',
+          '-f',
+          'null',
+          '-',
+        ]);
+        final stopped = mergeWithFfmpeg(
+          [
+            '-re',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440',
+            '-t',
+            '4',
+            '-f',
+            'null',
+            '-',
+          ],
+          cancel: cancel,
+          onProgress: (progress) {
+            updates++;
+            if (progress.milliseconds > 0) cancel.cancel('pause');
+          },
+        );
+        await Future.wait([
+          peer,
+          expectLater(
+            stopped.timeout(const Duration(seconds: 10)),
+            throwsA(isA<DioException>()),
+          ),
+        ]);
+        expect(updates, greaterThan(0));
         expect(tester.takeException(), isNull);
       } finally {
         c.dispose();

@@ -9,18 +9,17 @@ import 'bili_api.dart';
 import 'danmaku.dart';
 import 'download_job.dart';
 import 'models.dart';
+import 'media_merge.dart';
+import 'process_merge.dart';
+export 'media_merge.dart';
+export 'process_merge.dart';
 
-typedef MergeMedia = Future<void> Function(List<String> arguments);
 Future<String> directWorkingDirectory(String directory) async => directory;
 Future<String> directPublishFile(
   String file,
   String destination,
   String folder,
 ) async => file;
-Future<void> mergeWithProcess(List<String> arguments) async {
-  final result = await Process.run('ffmpeg', arguments);
-  if (result.exitCode != 0) throw const AppFailure('mergeFailed');
-}
 
 class NativeDownloadRunner implements DownloadRunner {
   NativeDownloadRunner(
@@ -167,6 +166,11 @@ class NativeDownloadRunner implements DownloadRunner {
 
   @override
   Future<void> run(DownloadJob job, void Function() changed) async {
+    if (job.token.isCancelled) throw job.token.cancelError!;
+    job.mergeProgress = null;
+    if (job.detail.startsWith('merge') || job.detail == 'stoppingMerge') {
+      job.detail = '';
+    }
     final o = job.options;
     // Resolve publication intentions before deciding whether any media is missing.
     await _recoverPublications(job);
@@ -193,10 +197,13 @@ class NativeDownloadRunner implements DownloadRunner {
     final watch = Stopwatch()..start();
     final progress = <String, (int, int)>{};
     void report(String kind, int received, int total) {
+      final previous = progress[kind]?.$1 ?? 0;
       progress[kind] = (received, total);
       job.received = progress.values.fold(0, (a, b) => a + b.$1);
       job.total = progress.values.fold(0, (a, b) => a + b.$2);
-      if (watch.elapsedMilliseconds >= 100 || received == total) {
+      if ((previous == 0 && received > 0) ||
+          watch.elapsedMilliseconds >= 100 ||
+          received == total) {
         watch.reset();
         changed();
       }
@@ -286,23 +293,38 @@ class NativeDownloadRunner implements DownloadRunner {
         changed();
         final merged = '$temp.merge.mp4';
         if (await File(merged).exists()) await File(merged).delete();
-        await merge([
-          '-nostdin',
-          '-n',
-          '-i',
-          '$temp.video',
-          '-i',
-          '$temp.$audioExt',
-          '-map',
-          '0:v:0',
-          '-map',
-          '1:a:0',
-          '-c',
-          'copy',
-          '-strict',
-          'experimental',
-          merged,
-        ]);
+        await merge(
+          [
+            '-nostdin',
+            '-n',
+            '-i',
+            '$temp.video',
+            '-i',
+            '$temp.$audioExt',
+            '-map',
+            '0:v:0',
+            '-map',
+            '1:a:0',
+            '-c',
+            'copy',
+            '-strict',
+            'experimental',
+            merged,
+          ],
+          cancel: job.token,
+          onProgress: (progress) {
+            job.mergeProgress = progress;
+            changed();
+          },
+          onStopping: (reason) {
+            job.state = JobState.pausing;
+            job.stage = 'stoppingMerge';
+            if (reason != 'stoppingMerge') job.detail = reason;
+            changed();
+          },
+        ).whenComplete(() {
+          if (job.detail.startsWith('merge')) job.detail = '';
+        });
         await _publishLocal(File(merged), output, job);
         await File('$temp.video').delete();
       } else if (video != null && !job.publications.containsKey(output)) {
@@ -352,6 +374,7 @@ class NativeDownloadRunner implements DownloadRunner {
 
   Future<void> _export(DownloadJob job) async {
     while (job.pendingExports.isNotEmpty) {
+      if (job.token.isCancelled) throw job.token.cancelError!;
       final file = job.pendingExports.first;
       final destination = await publishFile(
         file,
@@ -366,6 +389,7 @@ class NativeDownloadRunner implements DownloadRunner {
         await File(file).delete();
       }
     }
+    if (job.token.isCancelled) throw job.token.cancelError!;
   }
 
   Future<void> _publishLocal(
@@ -382,6 +406,7 @@ class NativeDownloadRunner implements DownloadRunner {
       await source.length(),
       (await sha256.bind(source.openRead()).first).toString(),
     );
+    if (job.token.isCancelled) throw job.token.cancelError!;
     job.publications[output] = proof;
     await job.checkpoint();
     await _finishPublication(job, output, proof);
@@ -411,6 +436,7 @@ class NativeDownloadRunner implements DownloadRunner {
               proof.digest) {
         throw const AppFailure('outputMissing');
       }
+      if (job.token.isCancelled) throw job.token.cancelError!;
       await source.rename(output);
     }
     if (!job.pendingExports.contains(output)) job.pendingExports.add(output);

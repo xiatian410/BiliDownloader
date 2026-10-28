@@ -4,9 +4,11 @@ import 'wire.dart';
 
 Map<String, dynamic> jobSnapshot(DownloadJob j) => {
   'id': j.id,
+  'submissionKey': j.submissionKey,
   'episode': episodeToJson(j.episode),
   'options': optionsToJson(j.options),
   'state': j.state.name,
+  'revision': j.revision,
   'stage': j.stage,
   'detail': j.detail,
   'received': j.received,
@@ -50,6 +52,8 @@ DownloadJob restoreJob(Map<String, dynamic> m) {
     id: id,
   );
   final state = JobState.values.byName(m['state'] as String);
+  j.submissionKey = m['submissionKey'] as String?;
+  j.revision = m['revision'] as int? ?? 0;
   j.state =
       [JobState.completed, JobState.failed, JobState.cancelled].contains(state)
       ? state

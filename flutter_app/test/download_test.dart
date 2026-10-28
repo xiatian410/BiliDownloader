@@ -36,6 +36,20 @@ class CommentsOnlyApi extends BiliApi {
       '<i><d p="1,1,25,16777215">test comment</d></i>';
 }
 
+class SeparateMediaApi extends DirectMediaApi {
+  SeparateMediaApi(super.url);
+  @override
+  Future<PlayableMedia> play(
+    Episode episode,
+    DownloadOptions options, {
+    CancelToken? cancel,
+  }) async => PlayableMedia(
+    qualities: const [Quality(80, '1080P')],
+    video: [MediaStream(url: url, quality: 80, codec: 7)],
+    audio: [MediaStream(url: url, bandwidth: 192000)],
+  );
+}
+
 void main() {
   late HttpServer server;
   late Directory dir;
@@ -137,7 +151,8 @@ void main() {
     final comments = CommentsOnlyApi();
     final worker = NativeDownloadRunner(
       comments,
-      merge: (_) => throw StateError('No merge expected'),
+      merge: (_, {cancel, onProgress, onStopping, idleTimeout}) =>
+          throw StateError('No merge expected'),
     );
     addTearDown(() {
       worker.dispose();
@@ -194,6 +209,43 @@ void main() {
       expect(await File(j.outputs.single).readAsBytes(), bytes);
     },
   );
+  test('cancelled merge preserves both source tracks and resumes without downloading their bodies', () async {
+    final mediaApi = SeparateMediaApi(url());
+    var merges = 0;
+    final worker = NativeDownloadRunner(
+      mediaApi,
+      merge: (arguments, {cancel, onProgress, onStopping, idleTimeout}) async {
+        for (var i = 0; i < arguments.length - 1; i++) {
+          if (arguments[i] == '-i') {
+            expect(await File(arguments[i + 1]).readAsBytes(), bytes);
+          }
+        }
+        final output = File(arguments.last);
+        expect(await output.exists(), false);
+        if (merges++ == 0) {
+          await output.writeAsBytes([1, 2, 3]);
+          cancel!.cancel('pause during merge');
+          onStopping?.call('stoppingMerge');
+          throw cancel.cancelError!;
+        }
+        await output.writeAsBytes([...bytes, ...bytes]);
+      },
+    );
+    addTearDown(() {
+      worker.dispose();
+      mediaApi.close();
+    });
+    final j = task();
+    await expectLater(worker.run(j, () {}), throwsA(isA<DioException>()));
+    expect(j.outputs, isEmpty);
+    expect(j.state, JobState.pausing);
+    final beforeResume = ranges.length;
+    j.token = CancelToken();
+    await worker.run(j, () {});
+    expect(merges, 2);
+    expect(ranges.skip(beforeResume), ['bytes=0-0', 'bytes=0-0']);
+    expect(await File(j.outputs.single).readAsBytes(), [...bytes, ...bytes]);
+  });
   test(
     'retry after export failure reuses completed files without downloading',
     () async {

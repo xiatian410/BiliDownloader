@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'dart:convert';
 
 import 'models.dart';
+import 'media_merge.dart';
 
 enum JobState {
   queued,
@@ -22,6 +23,7 @@ class DownloadJob {
   static int _sequence = 0;
   final String id;
   String? remoteId;
+  String? submissionKey;
   final Episode episode;
   final DownloadOptions options;
   JobState state = JobState.queued;
@@ -30,6 +32,8 @@ class DownloadJob {
   AppFailure? error;
   int received = 0, total = 0;
   int? actualQuality;
+  MergeProgress? mergeProgress;
+  int revision = 0;
   CancelToken token = CancelToken();
   final Map<String, StreamIdentity> streams = {};
   final List<String> outputs = [];
@@ -47,7 +51,8 @@ class DownloadJob {
   String? exportedDirectory;
   bool get active =>
       [JobState.running, JobState.pausing, JobState.merging].contains(state);
-  bool get canPause => [JobState.queued, JobState.running].contains(state);
+  bool get canPause =>
+      [JobState.queued, JobState.running, JobState.merging].contains(state);
 }
 
 class StreamIdentity {

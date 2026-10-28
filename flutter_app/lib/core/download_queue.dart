@@ -172,8 +172,9 @@ class DownloadQueue extends ChangeNotifier {
   void pause(DownloadJob job) {
     if (job.state == JobState.queued) {
       job.state = JobState.paused;
-    } else if (job.state == JobState.running) {
+    } else if ([JobState.running, JobState.merging].contains(job.state)) {
       job.state = JobState.pausing;
+      job.stage = 'pausing';
       job.token.cancel('pause');
     }
     if (_store != null && job.state == JobState.paused) {

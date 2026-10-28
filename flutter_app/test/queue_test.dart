@@ -64,16 +64,24 @@ void main() {
     queue.add([job(1), job(1)]);
     expect(runner.started.length, 1);
   });
-  test('merging cannot be paused or accidentally resumed', () {
-    final runner = PendingRunner();
-    final queue = DownloadQueue(runner);
-    addTearDown(queue.dispose);
-    final j = job(1);
-    queue.add([j]);
-    j.state = JobState.merging;
-    queue.pause(j);
-    queue.resume(j);
-    expect(j.state, JobState.merging);
-    expect(j.token.isCancelled, false);
-  });
+  test(
+    'merging pauses without rescheduling until the old worker ends',
+    () async {
+      final runner = PendingRunner();
+      final queue = DownloadQueue(runner);
+      addTearDown(queue.dispose);
+      final j = job(1);
+      queue.add([j]);
+      j.state = JobState.merging;
+      queue.pause(j);
+      queue.resume(j);
+      expect(j.state, JobState.pausing);
+      expect(j.token.isCancelled, true);
+      expect(runner.started.length, 1);
+      await Future<void>.delayed(Duration.zero);
+      expect(j.state, JobState.paused);
+      queue.resume(j);
+      expect(runner.started.length, 2);
+    },
+  );
 }

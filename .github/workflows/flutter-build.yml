@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: ['flutter/**']
-    paths: ['flutter_app/**', 'scripts/build_flutter.*', '.github/workflows/flutter-build.yml']
+    paths: ['flutter_app/**', 'scripts/**', '.github/workflows/flutter-build.yml']
   pull_request:
-    paths: ['flutter_app/**', 'scripts/build_flutter.*', '.github/workflows/flutter-build.yml']
+    paths: ['flutter_app/**', 'scripts/**', '.github/workflows/flutter-build.yml']
 permissions:
   contents: read
 jobs:
@@ -38,12 +38,18 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjson-glib-dev patchelf xvfb xauth dbus-x11 gnome-keyring
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjson-glib-dev patchelf xvfb xauth dbus-x11 gnome-keyring ffmpeg
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         if: matrix.target == 'android'
         with:
           distribution: temurin
           java-version: '17'
+      - name: Install Web fixture dependencies
+        if: matrix.target == 'web'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm ci --prefix scripts
       - name: Resolve dependencies
         working-directory: flutter_app
         run: flutter pub get --enforce-lockfile
@@ -60,7 +66,7 @@ jobs:
         if: matrix.target == 'windows'
         working-directory: flutter_app
         run: |
-          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart
+          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/media_merge_test.dart test/remote_runner_test.dart
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test integration_test/native_smoke_test.dart -d windows
       - name: Build Linux, Android or Web
@@ -71,6 +77,9 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: ./scripts/build_flutter.ps1
+      - name: Test Web download and recovery in Chrome
+        if: matrix.target == 'web'
+        run: MANAGE_FIXTURE=1 node scripts/test_flutter_web_flow.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BiliDownloader-${{ matrix.target }}
