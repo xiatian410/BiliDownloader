@@ -1,6 +1,6 @@
 # BiliDownloader
 
-Flutter 跨平台迁移工程位于 [`flutter_app/`](flutter_app/README.md)，构建与验证状态见 [`docs/flutter-validation.md`](docs/flutter-validation.md)。原 Python/PySide 实现保留在 `src/`。
+Flutter 重写工程位于 [`flutter_app/`](flutter_app/README.md)，当前构建与验证结果见[重构进度](docs/rewrite-progress.md)，问题清单、参考项目与多端设计见[重写方案](docs/rewrite-plan.md)。原 Python/PySide 实现保留在 `src/`，下方为原项目使用说明。
 
 ![tag](https://img.shields.io/badge/Language-Python3,_C++-orange.svg) ![tag](https://img.shields.io/badge/License-MIT-green.svg)
 

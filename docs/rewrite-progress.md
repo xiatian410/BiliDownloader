@@ -15,16 +15,17 @@
 
 ## 本次证据
 
-- 61 项 Flutter 测试通过，静态分析与差异检查通过；320/360/600/900/1440px、200% 字体、中文浅色及英文深色均覆盖。
+- 62 项 Flutter 测试通过，静态分析与差异检查通过；320/360/600/900/1440px、200% 字体、中文浅色及英文深色均覆盖。
 - Web Release 编译通过；Chrome 样本完整链路通过，包含真实 FFmpeg 合并、成品音视频解码、页面刷新恢复，以及服务重启后重新取回字节一致的成品。
 - 独立 Dart 进程的文件锁与强制终止写入测试通过；覆盖单份/双份记录损坏、写入失败阻止下载、任务恢复需明确继续、文件生成与状态记录之间中断、现有成品变化拒绝覆盖。
 - Web 未完成任务重启后保持原 ID、暂停后手动恢复测试通过。Android 导出提交顺序通过 MethodChannel 样本测试，不能代替真机文档提供方测试。
 - 服务端接口测试验证完整字节下载、跨会话文件拒绝、同源写入约束和 Cookie 不返回浏览器。
 - 生产服务真实 B站请求仍返回 HTTP 412，未验证真实账号下载。
-- 上一批 Linux、Android 三种 ABI、Web Release 编译通过；Android APK 签名和 16 KiB 对齐检查通过，尚无 Android 真机结果。本轮原生 Release 包以新 CI 结果为准。
+- 功能提交 `9c13c23` 的 Windows、Linux、Android 三种 ABI、Web Release 编译全部通过。三个 APK 的签名与 16 KiB 对齐检查通过；Android 尚无真机结果，APK 仍使用开发签名。
 - 本轮 Web UI 与独立 Linux Web 服务重新构建成功，运行二进制后的页面及持久化会话接口检查通过。新试验包位于 `artifacts/BiliDownloader-web-service-linux-x64.tar.gz`。
 - Linux 原生集成测试通过：实际窗口加载，以及内置 FFmpeg 生成、合并并解码两条音视频轨道。
-- 上一批提交 `2540c4b` 的 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40649596301) 全部成功；本轮持久化增量的构建结果另行核对。
+- 本轮 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40654698750) 全部成功。Windows 新增检查发现并修复短路径与规范化路径比较导致成品取回 404，以及测试脚本无法直接启动 `dart` 的问题；修复后 26 项恢复/下载检查通过，1 项仅适用 Unix 符号链接的检查跳过，Windows 原生窗口与 FFmpeg 集成测试通过。
+- 当前构建包下载到 `artifacts/ci-9c13c23/`，附压缩包校验记录 `SHA256SUMS.txt`。本轮没有合并 main 或发布 Release。
 
 ## 仍必须完成
 
