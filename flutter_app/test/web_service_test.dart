@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,8 +10,9 @@ import 'package:bili_downloader/core/wire.dart';
 import 'package:bili_downloader/server/web_service.dart';
 
 class ServiceFixtureApi extends BiliApi {
-  ServiceFixtureApi(this.mediaUrl);
+  ServiceFixtureApi(this.mediaUrl, {this.beforePlay});
   final String mediaUrl;
+  final Future<void> Function(CancelToken?)? beforePlay;
   @override
   Future<VideoInfo> resolve(VideoId id, {CancelToken? cancel}) async =>
       const VideoInfo(
@@ -27,12 +29,16 @@ class ServiceFixtureApi extends BiliApi {
     Episode episode,
     DownloadOptions options, {
     CancelToken? cancel,
-  }) async => PlayableMedia(
-    qualities: const [Quality(80, '1080P')],
-    video: [MediaStream(url: mediaUrl, quality: 80)],
-    audio: const [],
-    mp4: true,
-  );
+  }) async {
+    await beforePlay?.call(cancel);
+    return PlayableMedia(
+      qualities: const [Quality(80, '1080P')],
+      video: [MediaStream(url: mediaUrl, quality: 80)],
+      audio: const [],
+      mp4: true,
+    );
+  }
+
   @override
   Future<LoginQr> generateQr({CancelToken? cancel}) async =>
       const LoginQr('https://example.test/login', 'fixture-key');
@@ -50,6 +56,8 @@ void main() {
   late HttpServer media;
   late HttpClient client;
   var cookie = '';
+  var holdPlayback = false;
+  late Completer<void> playbackStarted;
   final payload = List.generate(8192, (i) => i % 255);
   Future<(int, Map<String, dynamic>, HttpHeaders)> post(
     String path,
@@ -75,8 +83,11 @@ void main() {
   }
 
   setUp(() async {
+    holdPlayback = false;
+    playbackStarted = Completer<void>();
     temp = await Directory.systemTemp.createTemp('bili-service-test-');
-    await File('${temp.path}/index.html').writeAsString('fixture');
+    await Directory('${temp.path}/web').create();
+    await File('${temp.path}/web/index.html').writeAsString('fixture');
     media = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     media.listen((r) async {
       r.response.headers.set('etag', 'fixture');
@@ -92,10 +103,17 @@ void main() {
       await r.response.close();
     });
     service = WebService(
-      webRoot: temp.path,
+      webRoot: '${temp.path}/web',
       downloadRoot: '${temp.path}/downloads',
-      apiFactory: () =>
-          ServiceFixtureApi('http://127.0.0.1:${media.port}/video'),
+      apiFactory: () => ServiceFixtureApi(
+        'http://127.0.0.1:${media.port}/video',
+        beforePlay: holdPlayback
+            ? (cancel) async {
+                playbackStarted.complete();
+                throw await cancel!.whenCancel;
+              }
+            : null,
+      ),
     );
     await service.start(port: 0);
     client = HttpClient();
@@ -109,6 +127,23 @@ void main() {
     await media.close(force: true);
     await temp.delete(recursive: true);
   });
+
+  test(
+    'download data cannot be configured inside the static web root',
+    () async {
+      final unsafe = WebService(
+        webRoot: temp.path,
+        downloadRoot: '${temp.path}/data',
+      );
+      await expectLater(
+        unsafe.start(port: 0),
+        throwsA(
+          isA<AppFailure>().having((e) => e.key, 'key', 'invalidDirectory'),
+        ),
+      );
+      await unsafe.close();
+    },
+  );
 
   test('same-origin service resolves, streams task events and returns exact file bytes', () async {
     final resolved = await post('/api/resolve', {'input': 'av1'});
@@ -150,6 +185,28 @@ void main() {
     final denied = await otherRequest.close();
     await denied.drain<void>();
     expect(denied.statusCode, 404);
+    await socket.close();
+    await service.close();
+    service = WebService(
+      webRoot: '${temp.path}/web',
+      downloadRoot: '${temp.path}/downloads',
+      apiFactory: () =>
+          ServiceFixtureApi('http://127.0.0.1:${media.port}/video'),
+    );
+    await service.start(port: 0);
+    final restored = await post('/api/session', {});
+    expect((restored.$2['jobs'] as List).single['id'], completed['id']);
+    expect((restored.$2['jobs'] as List).single['state'], 'completed');
+    final recoveredRequest = await client.getUrl(
+      Uri.parse('${service.origin}$url'),
+    );
+    recoveredRequest.headers.set('Cookie', cookie);
+    final recoveredFile = await recoveredRequest.close();
+    expect(recoveredFile.statusCode, 200);
+    expect(
+      await recoveredFile.fold<List<int>>([], (a, b) => a..addAll(b)),
+      payload,
+    );
     await post('/api/jobs/remove', {
       'ids': [completed['id']],
     });
@@ -157,11 +214,10 @@ void main() {
     expect(
       await Directory('${temp.path}/downloads')
           .list(recursive: true)
-          .where((f) => f is File)
+          .where((f) => f is File && f.path.endsWith('.mp4'))
           .length,
       1,
     );
-    await socket.close();
   });
   test(
     'cross-origin mutations and arbitrary unparsed episodes are rejected',
@@ -182,6 +238,50 @@ void main() {
     },
   );
   test(
+    'unfinished server work restores paused and resumes the original job',
+    () async {
+      holdPlayback = true;
+      final bootstrap = await post('/api/session', {}, session: '');
+      cookie = bootstrap.$3.value('set-cookie')!.split(';').first;
+      final resolved = await post('/api/resolve', {'input': 'av1'});
+      final episode = videoFromJson(resolved.$2).episodes.single;
+      final created = await post('/api/jobs', {
+        'episode': episode.identity,
+        'options': optionsToJson(
+          const DownloadOptions(directory: '', quality: 80),
+        ),
+      });
+      await playbackStarted.future.timeout(const Duration(seconds: 5));
+      await service.close();
+      service = WebService(
+        webRoot: '${temp.path}/web',
+        downloadRoot: '${temp.path}/downloads',
+        apiFactory: () =>
+            ServiceFixtureApi('http://127.0.0.1:${media.port}/video'),
+      );
+      await service.start(port: 0);
+      final restored = (await post('/api/session', {})).$2['jobs'] as List;
+      expect(restored.single['id'], created.$2['id']);
+      expect(restored.single['state'], 'paused');
+      final socket = await WebSocket.connect(
+        'ws://127.0.0.1:${service.port}/api/events',
+        headers: {'Cookie': cookie, 'Origin': service.origin},
+      );
+      final done = socket
+          .map((s) => jsonDecode(s as String) as Map)
+          .firstWhere((j) => j['state'] == 'completed');
+      await post('/api/jobs/control', {
+        'id': created.$2['id'],
+        'action': 'resume',
+      });
+      expect(
+        (await done.timeout(const Duration(seconds: 10)))['id'],
+        created.$2['id'],
+      );
+      await socket.close();
+    },
+  );
+  test(
     'QR credentials remain server-side and session cookie is HttpOnly',
     () async {
       final bootstrap = await post('/api/session', {}, session: '');
@@ -192,6 +292,15 @@ void main() {
       expect(login.$2, {'code': 0});
       expect(jsonEncode(login.$2), isNot(contains('fixture-private-cookie')));
       expect((await post('/api/session', {})).$2['authenticated'], true);
+      final records = await Directory('${temp.path}/downloads/.state')
+          .list()
+          .where((f) => f.path.endsWith('.json'))
+          .cast<File>()
+          .toList();
+      final contents = (await Future.wait(records.map((f) => f.readAsString())))
+          .join();
+      expect(contents, isNot(contains('fixture-private-cookie')));
+      expect(contents, isNot(contains(cookie.split('=').last)));
     },
   );
 }

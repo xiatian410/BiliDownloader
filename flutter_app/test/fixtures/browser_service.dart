@@ -1,5 +1,6 @@
 // Explicit local test fixture; never selected by the production entry point.
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:bili_downloader/core/bili_api.dart';
@@ -117,11 +118,12 @@ Future<void> main() async {
     }
     await r.response.close();
   });
-  final service = WebService(
+  WebService createService() => WebService(
     webRoot: 'build/web',
     downloadRoot: '${directory.path}/downloads',
     apiFactory: () => BrowserFixtureApi('http://127.0.0.1:${media.port}'),
   );
+  var service = createService();
   await service.start(port: 18744);
   stdout.writeln('Fixture ready: ${service.origin}');
   ProcessSignal.sigterm.watch().listen((_) async {
@@ -130,4 +132,13 @@ Future<void> main() async {
     await directory.delete(recursive: true);
     exit(0);
   });
+  await for (final command
+      in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+    if (command == 'restart') {
+      await service.close();
+      service = createService();
+      await service.start(port: 18744);
+      stdout.writeln('Fixture restarted: ${service.origin}');
+    }
+  }
 }

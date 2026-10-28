@@ -7,6 +7,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/models.dart';
+import '../core/file_state_store.dart';
+import '../core/state_store.dart';
+import '../core/download_job.dart';
+
+Future<StateStore?> openHistoryStore() async => FileStateStore(
+  p.join((await getApplicationSupportDirectory()).path, 'history', 'queue'),
+);
 
 const _channel = MethodChannel('bili_downloader/files');
 bool get isAndroid => Platform.isAndroid;
@@ -56,8 +63,9 @@ Future<void> openDirectory(String directory) async {
 Future<String> publishFile(
   String file,
   String destination,
-  String folder,
-) async {
+  String folder, {
+  bool retainSource = false,
+}) async {
   if (!destination.startsWith('content://')) return file;
   final uri = await _channel.invokeMethod<String>('publishFile', {
     'path': file,
@@ -67,8 +75,44 @@ Future<String> publishFile(
   });
   if (uri == null) throw const AppFailure('saveFailed');
   // Delete the staged copy only after the system confirms the export succeeded.
-  await File(file).delete();
+  if (!retainSource) await File(file).delete();
   return uri;
+}
+
+Future<String> publishStagedFile(
+  String file,
+  String destination,
+  String folder,
+) => publishFile(file, destination, folder, retainSource: true);
+
+Future<void> exportCompletedFiles(DownloadJob job, String directory) async {
+  for (var i = 0; i < job.outputs.length; i++) {
+    final source = job.outputs[i];
+    if (source.startsWith('content://')) continue;
+    final destination = await publishStagedFile(
+      source,
+      directory,
+      job.options.flatDirectory ? '' : job.episode.folderName,
+    );
+    final previousDirectory = job.exportedDirectory;
+    final previousExport = job.exportedFiles[source];
+    job.outputs[i] = destination;
+    job.exportedDirectory = directory;
+    job.exportedFiles[source] = destination;
+    try {
+      await job.checkpoint();
+    } catch (_) {
+      job.outputs[i] = source;
+      job.exportedDirectory = previousDirectory;
+      if (previousExport == null) {
+        job.exportedFiles.remove(source);
+      } else {
+        job.exportedFiles[source] = previousExport;
+      }
+      rethrow;
+    }
+    if (destination.startsWith('content://')) await File(source).delete();
+  }
 }
 
 Future<void> saveBytes(Uint8List data, String name, String directory) async {

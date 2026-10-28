@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import 'bili_api.dart';
@@ -100,13 +101,14 @@ class NativeDownloadRunner implements DownloadRunner {
             previous.size == total &&
             (tag != null && previous.validator != null
                 ? tag == previous.validator
-                : previous.url == url);
+                : previous.matchesUrl(url));
         var offset = await file.exists() ? await file.length() : 0;
         if (!same || offset > total) {
           await file.writeAsBytes([]);
           offset = 0;
         }
         job.streams[kind] = StreamIdentity(url, total, tag);
+        await job.checkpoint();
         progress(offset, total);
         if (offset == total) return total;
 
@@ -166,10 +168,17 @@ class NativeDownloadRunner implements DownloadRunner {
   @override
   Future<void> run(DownloadJob job, void Function() changed) async {
     final o = job.options;
-    if (job.pendingExports.isNotEmpty) {
-      job.state = JobState.merging;
-      job.stage = 'saving';
-      changed();
+    // Resolve publication intentions before deciding whether any media is missing.
+    await _recoverPublications(job);
+    if (job.publications.keys.any((path) => path.endsWith('.ass'))) {
+      job.commentsPrepared = true;
+    }
+    if (job.expectedMediaOutputs.isNotEmpty &&
+        job.expectedMediaOutputs.every(job.publications.containsKey)) {
+      job.mediaPrepared = true;
+    }
+    // Compatibility with an in-memory export retry created before publication manifests.
+    if (job.pendingExports.isNotEmpty && job.publications.isEmpty) {
       await _export(job);
       return;
     }
@@ -193,8 +202,11 @@ class NativeDownloadRunner implements DownloadRunner {
       }
     }
 
-    final staged = job.pendingExports;
-    for (var refresh = 0; !o.onlyDanmaku && refresh < 2; refresh++) {
+    for (
+      var refresh = 0;
+      !o.onlyDanmaku && !job.mediaPrepared && refresh < 2;
+      refresh++
+    ) {
       final media = await api.play(job.episode, o, cancel: job.token);
       if (media.mp4 && o.onlyAudio) {
         throw const AppFailure('mp4AudioUnsupported');
@@ -209,15 +221,24 @@ class NativeDownloadRunner implements DownloadRunner {
         '$basename.${o.onlyAudio ? audioExt : 'mp4'}',
       );
       final audioOutput = p.join(dir.path, '$basename.$audioExt');
-      if (await File(output).exists() ||
+      job.expectedMediaOutputs
+        ..clear()
+        ..add(output);
+      if (!o.onlyAudio && o.reserveAudio && audio != null) {
+        job.expectedMediaOutputs.add(audioOutput);
+      }
+      await job.checkpoint();
+      if ((await File(output).exists() &&
+              !job.publications.containsKey(output)) ||
           (!o.onlyAudio &&
               o.reserveAudio &&
               audio != null &&
-              await File(audioOutput).exists())) {
+              await File(audioOutput).exists() &&
+              !job.publications.containsKey(audioOutput))) {
         throw const AppFailure('fileExists');
       }
       try {
-        if (video != null) {
+        if (video != null && !job.publications.containsKey(output)) {
           job.stage = 'videoDownload';
           changed();
           await downloadStream(
@@ -228,7 +249,13 @@ class NativeDownloadRunner implements DownloadRunner {
             (n, total) => report('video', n, total),
           );
         }
-        if (audio != null) {
+        if (audio != null &&
+            (!job.publications.containsKey(
+                  o.onlyAudio ? audioOutput : output,
+                ) ||
+                (!o.onlyAudio &&
+                    o.reserveAudio &&
+                    !job.publications.containsKey(audioOutput)))) {
           job.stage = 'audioDownload';
           changed();
           await downloadStream(
@@ -252,7 +279,9 @@ class NativeDownloadRunner implements DownloadRunner {
       job.state = JobState.merging;
       job.stage = 'saving';
       changed();
-      if (video != null && audio != null) {
+      if (video != null &&
+          audio != null &&
+          !job.publications.containsKey(output)) {
         job.stage = 'merging';
         changed();
         final merged = '$temp.merge.mp4';
@@ -274,33 +303,45 @@ class NativeDownloadRunner implements DownloadRunner {
           'experimental',
           merged,
         ]);
-        await _publishLocal(File(merged), output);
+        await _publishLocal(File(merged), output, job);
         await File('$temp.video').delete();
-      } else if (video != null) {
-        await _publishLocal(File('$temp.video'), output);
+      } else if (video != null && !job.publications.containsKey(output)) {
+        await _publishLocal(File('$temp.video'), output, job);
       }
       if (audio != null) {
         if (o.onlyAudio || o.reserveAudio) {
-          await _publishLocal(File('$temp.$audioExt'), audioOutput);
-          staged.add(audioOutput);
+          if (!job.publications.containsKey(audioOutput)) {
+            await _publishLocal(File('$temp.$audioExt'), audioOutput, job);
+          }
         } else {
-          await File('$temp.$audioExt').delete();
+          if (await File('$temp.$audioExt').exists()) {
+            await File('$temp.$audioExt').delete();
+          }
         }
       }
-      if (!o.onlyAudio) staged.add(output);
+      job.mediaPrepared = true;
+      await job.checkpoint();
       break;
     }
-    if (o.danmaku || o.onlyDanmaku) {
+    if ((o.danmaku || o.onlyDanmaku) && !job.commentsPrepared) {
       job.stage = 'danmakuDownload';
       changed();
       try {
         final xml = await api.danmaku(job.episode.cid, cancel: job.token);
         final ass = File(p.join(dir.path, '$basename.ass'));
-        if (await ass.exists()) throw const AppFailure('fileExists');
-        await ass.writeAsString(danmakuToAss(xml), flush: true);
-        staged.add(ass.path);
-      } catch (_) {
-        if (o.onlyDanmaku) rethrow;
+        if (!job.publications.containsKey(ass.path)) {
+          final temporary = File('$temp.ass');
+          await temporary.writeAsString(danmakuToAss(xml), flush: true);
+          await _publishLocal(temporary, ass.path, job);
+        }
+        job.commentsPrepared = true;
+        await job.checkpoint();
+      } catch (e) {
+        if (o.onlyDanmaku ||
+            job.token.isCancelled ||
+            (e is AppFailure && e.key.startsWith('history'))) {
+          rethrow;
+        }
         job.detail = 'danmakuFailed';
       }
     }
@@ -317,14 +358,69 @@ class NativeDownloadRunner implements DownloadRunner {
         job.options.directory,
         job.options.flatDirectory ? '' : job.episode.folderName,
       );
-      job.outputs.add(destination);
+      if (!job.outputs.contains(destination)) job.outputs.add(destination);
+      job.exportedFiles[file] = destination;
       job.pendingExports.removeAt(0);
+      await job.checkpoint();
+      if (destination.startsWith('content://') && await File(file).exists()) {
+        await File(file).delete();
+      }
     }
   }
 
-  Future<void> _publishLocal(File source, String output) async {
-    if (await File(output).exists()) throw const AppFailure('fileExists');
-    await source.rename(output);
+  Future<void> _publishLocal(
+    File source,
+    String output,
+    DownloadJob job,
+  ) async {
+    if (await FileSystemEntity.type(output, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw const AppFailure('fileExists');
+    }
+    final proof = Publication(
+      source.path,
+      await source.length(),
+      (await sha256.bind(source.openRead()).first).toString(),
+    );
+    job.publications[output] = proof;
+    await job.checkpoint();
+    await _finishPublication(job, output, proof);
+  }
+
+  Future<void> _finishPublication(
+    DownloadJob job,
+    String output,
+    Publication proof,
+  ) async {
+    if (job.exportedFiles.containsKey(output)) return;
+    final target = File(output);
+    if (await FileSystemEntity.type(output, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      if (await FileSystemEntity.type(output, followLinks: false) !=
+              FileSystemEntityType.file ||
+          await target.length() != proof.size ||
+          (await sha256.bind(target.openRead()).first).toString() !=
+              proof.digest) {
+        throw const AppFailure('fileExists');
+      }
+    } else {
+      final source = File(proof.source);
+      if (!await source.exists() ||
+          await source.length() != proof.size ||
+          (await sha256.bind(source.openRead()).first).toString() !=
+              proof.digest) {
+        throw const AppFailure('outputMissing');
+      }
+      await source.rename(output);
+    }
+    if (!job.pendingExports.contains(output)) job.pendingExports.add(output);
+    await job.checkpoint();
+  }
+
+  Future<void> _recoverPublications(DownloadJob job) async {
+    for (final entry in job.publications.entries) {
+      await _finishPublication(job, entry.key, entry.value);
+    }
   }
 
   @override

@@ -139,6 +139,38 @@ class Strings {
     'downloadDefaults': ['默认下载选项', 'Download defaults'],
     'downloadFile': ['下载文件', 'Save file'],
     'episodeOptions': ['分集独立选项', 'Episode overrides'],
+    'historyCorrupt': [
+      '任务记录损坏，已保留原始文件并停止写入，请检查数据目录。',
+      'Task history is damaged. Original files are preserved and writes are stopped. Check the data directory.',
+    ],
+    'historyInUse': [
+      '任务数据正被另一个实例使用，请先关闭该实例。',
+      'Task data is in use by another instance. Close it first.',
+    ],
+    'historyNotReady': [
+      '任务记录尚未加载，暂不能开始下载。',
+      'Task history is not ready. Downloads cannot start yet.',
+    ],
+    'historyWriteFailed': [
+      '任务记录保存失败，请检查空间和权限后点击继续。',
+      'Could not save task state. Check disk space and permissions, then resume.',
+    ],
+    'historyReadFailed': [
+      '无法读取任务记录，请检查数据目录权限。',
+      'Cannot read task history. Check data directory permissions.',
+    ],
+    'historyRecovered': [
+      '已从上一份有效任务记录恢复，请核对任务状态。',
+      'Recovered the previous valid task history. Please review task states.',
+    ],
+    'interruptedTask': [
+      '上次运行中断，点击继续以校验并恢复。',
+      'The previous run was interrupted. Resume to verify and recover.',
+    ],
+    'outputMissing': [
+      '已生成的文件缺失或发生变化，请检查保存目录。',
+      'A prepared file is missing or has changed. Check the destination.',
+    ],
     'serviceUnavailable': [
       '下载服务不可用，请使用配套 Web 服务打开此页面。',
       'Download service unavailable. Open this page through the companion web server.',

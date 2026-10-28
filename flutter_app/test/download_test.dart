@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bili_downloader/core/bili_api.dart';
 import 'package:bili_downloader/core/download_job.dart';
+import 'package:bili_downloader/core/job_snapshot.dart';
 import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/platform/download_native.dart';
 
@@ -88,8 +89,11 @@ void main() {
     () async {
       final file = File('${dir.path}/partial');
       await file.writeAsBytes(bytes.take(1000).toList());
-      final j = task()
-        ..streams['video'] = StreamIdentity(url(), bytes.length, tag);
+      final j = restoreJob(
+        jobSnapshot(
+          task()..streams['video'] = StreamIdentity(url(), bytes.length, tag),
+        ),
+      );
       await runner.downloadStream(url(), file, 'video', j, (_, _) {});
       expect(ranges, ['bytes=0-0', 'bytes=1000-']);
       expect(await file.readAsBytes(), bytes);
@@ -202,4 +206,51 @@ void main() {
       expect(ranges, isEmpty);
     },
   );
+  for (final tamper in [false, true]) {
+    test(
+      'recovery after rename ${tamper ? 'rejects changed output' : 'reuses verified output'}',
+      () async {
+        final mediaApi = DirectMediaApi(url());
+        final worker = NativeDownloadRunner(mediaApi);
+        final noNetworkApi = CommentsOnlyApi();
+        final recoveryWorker = NativeDownloadRunner(noNetworkApi);
+        addTearDown(() {
+          worker.dispose();
+          recoveryWorker.dispose();
+          mediaApi.close();
+          noNetworkApi.close();
+        });
+        final j = task();
+        Map<String, dynamic>? committed;
+        j.onCheckpoint = () async {
+          // Simulate exit after moving the file, before recording its new location.
+          if (j.pendingExports.isNotEmpty) {
+            throw const AppFailure('historyWriteFailed');
+          }
+          committed = jobSnapshot(j);
+        };
+        await expectLater(worker.run(j, () {}), throwsA(isA<AppFailure>()));
+        final output = File(j.publications.keys.single);
+        expect(await output.readAsBytes(), bytes);
+        expect(committed!['pendingExports'], isEmpty);
+        final requests = ranges.length;
+        final restored = restoreJob(committed!);
+        if (tamper) {
+          await output.writeAsBytes([9, 8, 7]);
+          await expectLater(
+            recoveryWorker.run(restored, () {}),
+            throwsA(
+              isA<AppFailure>().having((e) => e.key, 'key', 'fileExists'),
+            ),
+          );
+          expect(await output.readAsBytes(), [9, 8, 7]);
+        } else {
+          await recoveryWorker.run(restored, () {});
+          expect(restored.outputs, [output.path]);
+          expect(await output.readAsBytes(), bytes);
+        }
+        expect(ranges.length, requests);
+      },
+    );
+  }
 }

@@ -1,6 +1,10 @@
 import 'dart:typed_data';
 
 import '../core/models.dart';
+import '../core/state_store.dart';
+import '../core/download_job.dart';
+
+Future<StateStore?> openHistoryStore() async => null;
 
 bool get isAndroid => false;
 bool get isLinux => false;
@@ -18,4 +22,7 @@ Future<String> publishFile(
   String folder,
 ) async => throw const AppFailure('webDownloadUnsupported');
 Future<void> saveBytes(Uint8List data, String name, String directory) async =>
+    throw const AppFailure('webDownloadUnsupported');
+
+Future<void> exportCompletedFiles(DownloadJob job, String directory) async =>
     throw const AppFailure('webDownloadUnsupported');

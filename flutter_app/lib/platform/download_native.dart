@@ -12,7 +12,7 @@ DownloadRunner createDownloadRunner(BiliApi api) => NativeDownloadRunner(
   api,
   merge: mergeWithFfmpeg,
   workingDirectory: platform.workingDirectory,
-  publishFile: platform.publishFile,
+  publishFile: platform.publishStagedFile,
 );
 
 Future<void> mergeWithFfmpeg(List<String> arguments) async {

@@ -59,7 +59,10 @@ jobs:
       - name: Test Windows window and bundled FFmpeg
         if: matrix.target == 'windows'
         working-directory: flutter_app
-        run: flutter test integration_test/native_smoke_test.dart -d windows
+        run: |
+          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter test integration_test/native_smoke_test.dart -d windows
       - name: Build Linux, Android or Web
         if: matrix.target != 'windows'
         shell: bash

@@ -1,25 +1,51 @@
-// Run with: dart run test/fixtures/browser_service.dart (from flutter_app).
+// MANAGE_FIXTURE=1 starts/stops the fixture and additionally tests service restart.
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
+const { createInterface } = require('node:readline');
 
 (async () => {
   const output = path.resolve(__dirname, '../artifacts/rewrite');
   fs.mkdirSync(output, { recursive: true });
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
-    headless: true, args: process.getuid?.() === 0 ? ['--no-sandbox'] : [] });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', e => errors.push(e.message));
-  async function semantics() {
-    await page.waitForSelector('flt-glass-pane', { state: 'attached' });
-    const placeholder = page.locator('flt-semantics-placeholder');
-    if (await placeholder.count()) await placeholder.evaluate(e => e.click());
+  let fixture, fixtureLines, browser;
+  function waitForFixture(message) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error(`Fixture timed out: ${message}`)), 30000);
+      const line = value => { if (value.startsWith(message)) finish(); };
+      const closed = code => finish(new Error(`Fixture exited: ${code}`));
+      function finish(error) {
+        clearTimeout(timer);
+        fixtureLines.off('line', line);
+        fixture.off('exit', closed);
+        fixture.off('error', finish);
+        error ? reject(error) : resolve();
+      }
+      fixtureLines.on('line', line);
+      fixture.once('exit', closed);
+      fixture.once('error', finish);
+    });
   }
   try {
+    if (process.env.MANAGE_FIXTURE === '1') {
+      fixture = spawn('dart', ['run', 'test/fixtures/browser_service.dart'], {
+        cwd: path.resolve(__dirname, '../flutter_app'), stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      fixtureLines = createInterface({ input: fixture.stdout });
+      await waitForFixture('Fixture ready:');
+    }
+    browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
+      headless: true, args: process.getuid?.() === 0 ? ['--no-sandbox'] : [] });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    async function semantics() {
+      await page.waitForSelector('flt-glass-pane', { state: 'attached' });
+      const placeholder = page.locator('flt-semantics-placeholder');
+      if (await placeholder.count()) await placeholder.evaluate(e => e.click());
+    }
     await page.goto(process.env.WEB_URL || 'http://127.0.0.1:18744', { waitUntil: 'networkidle' });
     await semantics();
     await page.getByRole('textbox').first().fill('av1;av412');
@@ -44,6 +70,21 @@ const { execFileSync } = require('node:child_process');
     await semantics();
     await page.getByText('下载任务', { exact: true }).click();
     await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor();
+    if (fixture) {
+      const restarted = waitForFixture('Fixture restarted:');
+      fixture.stdin.write('restart\n');
+      await restarted;
+      await page.reload({ waitUntil: 'networkidle' });
+      await semantics();
+      await page.getByText('下载任务', { exact: true }).click();
+      await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor();
+      const afterRestartPromise = page.waitForEvent('download');
+      await page.getByRole('button', { name: '下载文件 1', exact: true }).click();
+      const afterRestart = await afterRestartPromise;
+      const recoveredFile = path.join(output, 'recovered.mp4');
+      await afterRestart.saveAs(recoveredFile);
+      assert.deepEqual(fs.readFileSync(recoveredFile), fs.readFileSync(file));
+    }
     await page.setViewportSize({ width: 360, height: 800 });
     await page.screenshot({ path: path.join(output, 'mobile-task.png') });
     await page.getByRole('tab', { name: '新建下载', exact: true }).click();
@@ -56,7 +97,18 @@ const { execFileSync } = require('node:child_process');
     await page.screenshot({ path: path.join(output, 'mobile-dark.png') });
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(output, 'browser-result.json'), JSON.stringify({ fixture: true, errors,
-      downloadedFile: path.basename(file), streams: probe.streams.map(s => s.codec_type), reloadPreservedTask: true }, null, 2));
-    console.log('Browser fixture passed: batch partial failure, download, FFmpeg merge, file export, refresh recovery, mobile rendering.');
-  } finally { await browser.close(); }
+      downloadedFile: path.basename(file), streams: probe.streams.map(s => s.codec_type), reloadPreservedTask: true,
+      serviceRestartPreservedTask: !!fixture }, null, 2));
+    console.log(`Browser fixture passed: batch partial failure, download, FFmpeg merge, file export, refresh recovery, mobile rendering${fixture ? ', service restart' : ''}.`);
+  } finally {
+    await browser?.close();
+    if (fixture?.pid && fixture.exitCode === null && fixture.signalCode === null) {
+      const exit = new Promise(resolve => fixture.once('exit', resolve));
+      fixture.kill('SIGTERM');
+      const force = setTimeout(() => fixture.kill('SIGKILL'), 10000);
+      await exit;
+      clearTimeout(force);
+    }
+    fixtureLines?.close();
+  }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -12,12 +12,18 @@ import '../core/download_job.dart';
 import '../core/io_download_runner.dart';
 import '../core/models.dart';
 import '../core/wire.dart';
+import '../core/file_state_store.dart';
+import '../core/job_snapshot.dart';
 
 class _Session {
-  _Session(this.id, this.api) : runner = NativeDownloadRunner(api);
+  _Session(this.id, this.api, this.store) : runner = NativeDownloadRunner(api);
   final String id;
   final BiliApi api;
   final NativeDownloadRunner runner;
+  final FileStateStore store;
+  bool recovered = false;
+  AppFailure? storageError;
+  Future<void> persistenceTail = Future.value();
   final episodes = <String, Episode>{};
   final covers = <String, String>{};
   final jobs = <String, DownloadJob>{};
@@ -29,10 +35,12 @@ class _Session {
 /// Same-origin local web host. Remote exposure requires a separate authenticated gateway.
 class WebService {
   WebService({
-    required this.webRoot,
-    required this.downloadRoot,
+    required String webRoot,
+    required String downloadRoot,
     BiliApi Function()? apiFactory,
-  }) : apiFactory = apiFactory ?? BiliApi.new;
+  }) : apiFactory = apiFactory ?? BiliApi.new,
+       webRoot = p.normalize(p.absolute(webRoot)),
+       downloadRoot = p.normalize(p.absolute(downloadRoot));
   final String webRoot, downloadRoot;
   final BiliApi Function() apiFactory;
   final _sessions = <String, _Session>{};
@@ -40,14 +48,102 @@ class WebService {
   HttpServer? _server;
   int _active = 0;
   bool _closed = false;
+  FileStateStore? _lease;
   final _running = <Future<void>>{};
   int get port => _server!.port;
   String get origin => 'http://127.0.0.1:$port';
 
   Future<void> start({int port = 18743}) async {
+    if (webRoot == downloadRoot || p.isWithin(webRoot, downloadRoot)) {
+      throw const AppFailure('invalidDirectory');
+    }
     await Directory(downloadRoot).create(recursive: true);
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-    _server!.listen((request) => unawaited(_handle(request)));
+    _lease = FileStateStore(p.join(downloadRoot, '.state', 'service'));
+    await _lease!.read();
+    final directory = Directory(p.join(downloadRoot, '.state'));
+    final ids = <String>{};
+    await for (final file in directory.list()) {
+      final match = RegExp(r'^([a-f0-9]{64})\.[01]\.json$')
+          .firstMatch(p.basename(file.path));
+      if (match != null) ids.add(match[1]!);
+    }
+    try {
+      for (final id in ids) {
+        final store = FileStateStore(p.join(directory.path, id));
+        final session = _Session(id, apiFactory(), store);
+        _sessions[id] = session;
+        final snapshot = await store.read();
+        if (snapshot.data['version'] != 1) {
+          throw const AppFailure('historyCorrupt');
+        }
+        session.recovered = snapshot.recovered;
+        session.used =
+            DateTime.tryParse(snapshot.data['used'] as String? ?? '') ??
+            DateTime.now();
+        for (final raw in snapshot.data['jobs'] as List? ?? []) {
+          final job = restoreJob(Map<String, dynamic>.from(raw));
+          final root = p.join(downloadRoot, id);
+          final paths = [
+            ...job.outputs,
+            ...job.pendingExports,
+            ...job.expectedMediaOutputs,
+            ...job.publications.keys,
+            ...job.publications.values.map((v) => v.source),
+            ...job.exportedFiles.keys,
+            ...job.exportedFiles.values,
+          ];
+          if (job.options.directory != root ||
+              paths.any((path) => !p.isWithin(root, p.normalize(path)))) {
+            throw const AppFailure('historyCorrupt');
+          }
+          job.onCheckpoint = () => _persist(session);
+          if (session.jobs.containsKey(job.id)) {
+            throw const AppFailure('historyCorrupt');
+          }
+          session.jobs[job.id] = job;
+          session.episodes[job.episode.identity] = job.episode;
+        }
+      }
+    } catch (_) {
+      await close();
+      rethrow;
+    }
+    try {
+      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+      _server!.listen((request) => unawaited(_handle(request)));
+    } catch (_) {
+      await close();
+      rethrow;
+    }
+  }
+
+  String _sessionKey(String token) =>
+      sha256.convert(utf8.encode(token)).toString();
+  Future<void> _transaction(_Session s, Future<void> Function() action) {
+    final next = s.persistenceTail.then((_) => action());
+    s.persistenceTail = next.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return next;
+  }
+
+  Future<void> _persist(_Session s) => _transaction(s, () => _writeSession(s));
+
+  Future<void> _writeSession(_Session s) async {
+    try {
+      await s.store.write({
+        'version': 1,
+        'used': s.used.toIso8601String(),
+        'jobs': s.jobs.values.map(jobSnapshot).toList(),
+      });
+      s.storageError = null;
+    } catch (e) {
+      s.storageError = e is AppFailure
+          ? e
+          : const AppFailure('historyWriteFailed');
+      rethrow;
+    }
   }
 
   String _id() => List.generate(
@@ -74,7 +170,7 @@ class WebService {
   _Session? _session(HttpRequest r) {
     for (final c in r.cookies) {
       if (c.name == 'bili_session') {
-        final session = _sessions[c.value];
+        final session = _sessions[_sessionKey(c.value)];
         if (session != null) session.used = DateTime.now();
         return session;
       }
@@ -110,6 +206,7 @@ class WebService {
   void _schedule() {
     if (_closed) return;
     for (final s in _sessions.values) {
+      if (s.storageError != null) continue;
       for (final j in s.jobs.values) {
         if (_active >= 4) return;
         if (j.state != JobState.queued) continue;
@@ -133,9 +230,11 @@ class WebService {
   Future<void> _run(_Session s, DownloadJob j) async {
     try {
       j.error = null;
+      await _persist(s);
       await s.runner.run(j, () => _emit(s, j));
       j.state = JobState.completed;
       j.stage = 'completed';
+      await _persist(s);
     } on DioException catch (e) {
       j.state = CancelToken.isCancel(e) ? JobState.paused : JobState.failed;
       if (!CancelToken.isCancel(e)) {
@@ -148,6 +247,14 @@ class WebService {
       j.state = JobState.failed;
       j.error = e is AppFailure ? e : const AppFailure('downloadFailed');
     } finally {
+      if (s.storageError == null) {
+        try {
+          await _persist(s);
+        } catch (_) {
+          j.state = JobState.failed;
+          j.error = s.storageError;
+        }
+      }
       _active--;
       _emit(s, j);
       _schedule();
@@ -188,11 +295,13 @@ class WebService {
           // Expire idle sessions only on incoming work, with no background polling.
           for (final old in _sessions.values.toList()) {
             if (DateTime.now().difference(old.used) >
-                    const Duration(hours: 24) &&
-                !old.jobs.values.any((j) => j.active)) {
+                    const Duration(days: 30) &&
+                old.jobs.isEmpty &&
+                old.sockets.isEmpty) {
               _sessions.remove(old.id);
               old.runner.dispose();
               old.api.close();
+              await old.store.close();
               for (final socket in old.sockets) {
                 unawaited(socket.close());
               }
@@ -202,16 +311,38 @@ class WebService {
             _json(r, {'error': 'serviceBusy'}, status: 429);
             return;
           }
-          s = _Session(_id(), apiFactory());
+          final token = _id();
+          final id = _sessionKey(token);
+          final store = FileStateStore(p.join(downloadRoot, '.state', id));
+          s = _Session(id, apiFactory(), store);
           _sessions[s.id] = s;
+          try {
+            await store.read();
+          } catch (_) {
+            _sessions.remove(id);
+            s.api.close();
+            s.runner.dispose();
+            await store.close();
+            rethrow;
+          }
           r.response.headers.add(
             'set-cookie',
-            'bili_session=${s.id}; HttpOnly; SameSite=Strict; Path=/',
+            'bili_session=$token; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000',
+          );
+        } else {
+          final token = r.cookies
+              .firstWhere((c) => c.name == 'bili_session')
+              .value;
+          r.response.headers.add(
+            'set-cookie',
+            'bili_session=$token; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000',
           );
         }
+        await _persist(s);
         _json(r, {
           'authenticated': s.api.cookies.isNotEmpty,
           'jobs': s.jobs.values.map(_job).toList(),
+          'recovered': s.recovered,
         });
         return;
       }
@@ -296,7 +427,11 @@ class WebService {
           return;
         }
         final file = File(job.outputs[index]);
-        if (!await file.exists()) {
+        if (!await file.exists() ||
+            !p.isWithin(
+              p.join(downloadRoot, s.id),
+              await file.resolveSymbolicLinks(),
+            )) {
           _json(r, {'error': 'notFound'}, status: 404);
           return;
         }
@@ -365,13 +500,20 @@ class WebService {
           if (s.jobs.length >= 200) throw const AppFailure('serviceBusy');
           final options = optionsFromJson(
             Map<String, dynamic>.from(body['options']),
-            directory: p.join(
-              downloadRoot,
-              sha256.convert(utf8.encode(s.id)).toString(),
-            ),
+            directory: p.join(downloadRoot, s.id),
           );
           final j = DownloadJob(episode, options);
-          s.jobs[j.id] = j;
+          j.onCheckpoint = () => _persist(s);
+          await _transaction(s, () async {
+            if (s.jobs.length >= 200) throw const AppFailure('serviceBusy');
+            s.jobs[j.id] = j;
+            try {
+              await _writeSession(s);
+            } catch (_) {
+              s.jobs.remove(j.id);
+              rethrow;
+            }
+          });
           _json(r, _job(j));
           _schedule();
         case '/api/jobs/remove':
@@ -379,9 +521,22 @@ class WebService {
           if (ids is! List || ids.length > 200) {
             throw const AppFailure('invalidResponse');
           }
-          for (final id in ids) {
-            if (s.jobs[id]?.state == JobState.completed) s.jobs.remove(id);
-          }
+          await _transaction(s, () async {
+            final removed = <String, DownloadJob>{};
+            for (final id in ids) {
+              final job = s.jobs[id];
+              if (job?.state == JobState.completed) {
+                removed[job!.id] = job;
+                s.jobs.remove(id);
+              }
+            }
+            try {
+              await _writeSession(s);
+            } catch (_) {
+              s.jobs.addAll(removed);
+              rethrow;
+            }
+          });
           _json(r, {'ok': true});
         case '/api/jobs/control':
           final j = s.jobs[body['id']];
@@ -396,8 +551,9 @@ class WebService {
           } else if (body['action'] == 'resume' &&
               [JobState.paused, JobState.failed].contains(j.state)) {
             j.state = JobState.queued;
-            _schedule();
           }
+          await _persist(s);
+          _schedule();
           _emit(s, j);
           _json(r, _job(j));
         default:
@@ -465,9 +621,12 @@ class WebService {
     }
     await Future.wait(_running.toList());
     for (final s in _sessions.values) {
+      await s.persistenceTail;
       s.runner.dispose();
       s.api.close();
+      await s.store.close();
     }
     await _server?.close(force: true);
+    await _lease?.close();
   }
 }

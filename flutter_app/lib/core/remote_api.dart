@@ -13,6 +13,7 @@ class RemoteBiliApi extends BiliApi {
   @override
   bool get authenticated => _authenticated;
   List<dynamic> restoredJobs = [];
+  bool recoveredHistory = false;
   Future<Map<String, dynamic>> call(
     String path, [
     Map<String, dynamic> body = const {},
@@ -45,6 +46,7 @@ class RemoteBiliApi extends BiliApi {
     final data = await call('/api/session');
     _authenticated = data['authenticated'] == true;
     restoredJobs = data['jobs'] as List? ?? [];
+    recoveredHistory = data['recovered'] == true;
   }
 
   @override

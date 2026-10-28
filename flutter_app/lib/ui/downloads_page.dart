@@ -265,16 +265,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 onPressed: () => c.perform(() async {
                   final directory = await platform.chooseDirectory();
                   if (directory == null) return;
-                  for (var i = 0; i < job.outputs.length; i++) {
-                    if (!job.outputs[i].startsWith('content://')) {
-                      job.outputs[i] = await platform.publishFile(
-                        job.outputs[i],
-                        directory,
-                        job.options.flatDirectory ? '' : job.episode.folderName,
-                      );
-                    }
-                  }
-                  job.exportedDirectory = directory;
+                  await platform.exportCompletedFiles(job, directory);
                 }),
                 child: Text(s('exportFiles')),
               ),

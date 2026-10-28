@@ -12,6 +12,7 @@ import 'core/models.dart';
 import 'core/settings.dart';
 import 'core/remote_api.dart';
 import 'core/wire.dart';
+import 'core/state_store.dart';
 import 'platform/platform.dart' as platform;
 
 abstract class AppStore {
@@ -71,10 +72,16 @@ class LocalAppStore implements AppStore {
 }
 
 class AppController extends ChangeNotifier {
-  AppController({required this.api, required this.queue, required this.store});
+  AppController({
+    required this.api,
+    required this.queue,
+    required this.store,
+    this.openHistory,
+  });
   final BiliApi api;
   final DownloadQueue queue;
   final AppStore store;
+  final Future<StateStore?> Function()? openHistory;
   static const storageTimeout = Duration(seconds: 5);
   AppSettings settings = AppSettings();
   bool initializing = true;
@@ -117,9 +124,20 @@ class AppController extends ChangeNotifier {
     }
     if (_disposed) return;
     try {
+      final history = await openHistory?.call();
+      if (history != null) {
+        await queue.restore(history);
+        if (queue.recoveredHistory) notice = 'historyRecovered';
+      }
+    } catch (e) {
+      error = e is AppFailure ? e : const AppFailure('historyCorrupt');
+    }
+    if (_disposed) return;
+    try {
       await api.initializeSession();
       if (api is RemoteBiliApi) {
         final remote = api as RemoteBiliApi;
+        if (remote.recoveredHistory) notice = 'historyRecovered';
         queue.add(
           remote.restoredJobs.map((raw) {
             final data = Map<String, dynamic>.from(raw);
@@ -134,6 +152,13 @@ class AppController extends ChangeNotifier {
             job.received = data['received'] as int;
             job.total = data['total'] as int;
             job.actualQuality = data['actualQuality'] as int?;
+            job.detail = data['detail'] as String? ?? '';
+            if (data['error'] is Map) {
+              job.error = AppFailure(
+                data['error']['key'] as String,
+                data['error']['detail'] as String? ?? '',
+              );
+            }
             if (['completed', 'paused', 'failed'].contains(data['state'])) {
               job.state = JobState.values.byName(data['state'] as String);
             }

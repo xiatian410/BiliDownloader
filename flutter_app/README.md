@@ -9,6 +9,7 @@ Flutter migration of the Python/PySide application. The original `src/` remains 
 - BV/AV video and MD/EP series resolution, WBI-signed playback URLs, QR sign-in.
 - Maximum quality, preferred AVC/HEVC/AV1 codec, optional FLAC/Dolby and AI dubbed audio.
 - Concurrent download queue (1–8), pause/resume, bounded network retries and one expired-link refresh.
+- Checksummed task history and frozen task options; unfinished jobs restore paused and resume only on request.
 - HTTP Range and resource validation before appending partial downloads; existing output files are not overwritten.
 - FFmpeg stream-copy merge, audio-only/comment-only modes, separate audio retention and ASS comments.
 - Stable media identifiers in output names, flat or grouped directories, searchable tasks and scoped batch actions.
@@ -54,7 +55,8 @@ Build artifacts go to the root `artifacts/` directory (ignored by Git). `.github
 
 - Minimum Android version: API 24 (Android 7.0).
 - Select a system folder in Settings to save outside the app's private storage. Permission is retained across launches.
-- Downloads run while the application is open; there is no background service or persistent queue after process termination.
+- Downloads run while the application is open; there is no background service yet. Task records survive process termination, with unfinished tasks restored paused.
+- SAF exports retain the staged source until history commits. Recovery from termination during a document-provider copy still needs device validation; an existing destination is preserved and may require manual reconciliation.
 - Release APKs currently use the generated **development signing key**. Configure a private release signing key before distributing updates to users or publishing to a store. No signing key is committed.
 - The app requests Internet access and user-selected folder access; it does not request unrestricted storage access.
 
@@ -64,13 +66,13 @@ Build artifacts go to the root `artifacts/` directory (ignored by Git). `.github
 
 After building, run `dart run bin/web_server.dart` from `flutter_app` and open `http://127.0.0.1:18743`. Install FFmpeg on the service host. A plain static file server is insufficient for login and downloads.
 
-The service currently binds to loopback. It keeps Bilibili cookies in memory and never sends them to the frontend. Browser refresh restores tasks while the service is running; process restart persistence and authenticated remote deployment remain in progress. See [Web service instructions](../docs/web-service.md), including the real-browser fixture test and independent executable build.
+The service currently binds to loopback. It keeps Bilibili cookies in memory and never sends them to the frontend. The same browser session restores tasks across refresh and service restart; Bilibili sign-in must be repeated after service restart. Authenticated remote deployment remains in progress. See [Web service instructions](../docs/web-service.md), including the real-browser fixture test and independent executable build.
 
 ## Migration limits
 
 - Existing Python settings and encrypted sessions are left untouched. Sign in again in Flutter.
 - The private legacy updater and Qt-specific font/style switches are not reused. Flutter has its own bundled font and rendering.
-- The queue and partial-download identity are kept for the current app session; restart persistence is not implemented.
+- Native history lives in the application support directory under `history/queue.*.json`; server history lives under the download root's `.state/`. Records store media URL fingerprints, not signed URLs or credentials. Corrupt records are preserved rather than silently reset.
 - ASS currently covers ordinary scrolling/top/bottom comments; positioned/scripted comments are not converted.
 - A successful mock test or build does not prove that Bilibili permits requests from a particular IP/account. Report HTTP/API failures separately from field mapping or UI errors.
 
