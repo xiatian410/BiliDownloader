@@ -327,6 +327,9 @@ class WebService {
     'total': j.total,
     'actualQuality': j.actualQuality,
     'merge': j.mergeProgress?.toJson(),
+    'attachments': j.attachments.map(
+      (key, value) => MapEntry(key, value.toJson()),
+    ),
     'error': j.error == null
         ? null
         : {'key': j.error!.key, 'detail': j.error!.detail},
@@ -652,48 +655,19 @@ class WebService {
       }
       if (route.startsWith('/api/cover/') && r.method == 'GET') {
         final url = s.covers[r.uri.pathSegments.last];
-        final uri = url == null ? null : Uri.tryParse(url);
-        if (uri == null ||
-            uri.scheme != 'https' ||
-            !(uri.host.endsWith('.hdslb.com') ||
-                uri.host.endsWith('.bilibili.com'))) {
+        if (url == null) {
           _json(r, {'error': 'notFound'}, status: 404);
           return;
         }
-        final image = await s.api.dio.get<ResponseBody>(
-          url!,
-          options: Options(
-            headers: biliHeaders,
-            responseType: ResponseType.stream,
-            followRedirects: false,
-          ),
-        );
-        final type = image.headers.value('content-type')?.split(';').first;
-        final ext = const {
-          'image/jpeg': 'jpg',
-          'image/png': 'png',
-          'image/webp': 'webp',
-          'image/avif': 'avif',
-        }[type];
-        if (ext == null) {
-          await image.data!.stream.listen(null).cancel();
-          throw const AppFailure('invalidResponse');
-        }
-        final bytes = <int>[];
-        await for (final chunk in image.data!.stream) {
-          bytes.addAll(chunk);
-          if (bytes.length > 16 * 1024 * 1024) {
-            throw const AppFailure('requestTooLarge');
-          }
-        }
-        r.response.headers.set('Content-Type', type!);
+        final image = await s.api.fetchCover(url);
+        r.response.headers.set('Content-Type', image.contentType);
         if (r.uri.queryParameters['download'] == '1') {
           r.response.headers.set(
             'Content-Disposition',
-            'attachment; filename="cover.$ext"',
+            'attachment; filename="cover.${image.extension}"',
           );
         }
-        r.response.add(bytes);
+        r.response.add(image.bytes);
         return;
       }
       if (route.startsWith('/api/files/') && r.method == 'GET') {
@@ -849,8 +823,7 @@ class WebService {
               j.stage = 'pausing';
               j.token.cancel('pause');
             }
-          } else if (body['action'] == 'resume' &&
-              [JobState.paused, JobState.failed].contains(j.state)) {
+          } else if (body['action'] == 'resume' && j.canResume) {
             j.state = JobState.queued;
           }
           await _persist(s);

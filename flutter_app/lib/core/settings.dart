@@ -12,6 +12,8 @@ class AppSettings {
   bool limitTitle = true;
   bool flatDirectory = false;
   bool onlyDanmaku = false;
+  bool autoCover = false;
+  bool nfo = false;
   String theme = 'system';
   // A non-secret hint detects cleared ownership cookies; it grants no access.
   String serviceWorkspace = '';
@@ -30,6 +32,8 @@ class AppSettings {
     'limitTitle': limitTitle,
     'flatDirectory': flatDirectory,
     'onlyDanmaku': onlyDanmaku,
+    'autoCover': autoCover,
+    'nfo': nfo,
     'theme': theme,
     'serviceWorkspace': serviceWorkspace,
   };
@@ -55,6 +59,8 @@ class AppSettings {
     s.limitTitle = data['limitTitle'] != false;
     s.flatDirectory = data['flatDirectory'] == true;
     s.onlyDanmaku = data['onlyDanmaku'] == true;
+    s.autoCover = data['autoCover'] == true;
+    s.nfo = data['nfo'] == true;
     if (['system', 'light', 'dark'].contains(data['theme'])) {
       s.theme = data['theme'] as String;
     }

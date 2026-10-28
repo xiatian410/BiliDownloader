@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'models.dart';
 import 'media_merge.dart';
+import 'attachments.dart';
 
 enum JobState {
   submitting,
@@ -39,6 +40,15 @@ class DownloadJob {
   CancelToken token = CancelToken();
   final Map<String, StreamIdentity> streams = {};
   final List<String> outputs = [];
+  // Remote queues receive display names separately from opaque download URLs.
+  final List<String> outputNames = [];
+  final Map<String, AttachmentResult> attachments = {};
+  bool get hasAttachmentFailures =>
+      attachments.values.any((a) => a.state == AttachmentState.failed);
+  bool get canResume =>
+      !controlPending &&
+      ([JobState.paused, JobState.failed].contains(state) ||
+          (state == JobState.completed && hasAttachmentFailures));
   final List<String> pendingExports = [];
   final Map<String, Publication> publications = {};
   final Map<String, String> exportedFiles = {};
@@ -47,7 +57,11 @@ class DownloadJob {
   final List<String> expectedMediaOutputs = [];
   Future<void> Function()? onCheckpoint;
   Future<void> checkpoint() async {
-    await onCheckpoint?.call();
+    try {
+      await onCheckpoint?.call();
+    } catch (e) {
+      throw e is AppFailure ? e : const AppFailure('historyWriteFailed');
+    }
   }
 
   String? exportedDirectory;

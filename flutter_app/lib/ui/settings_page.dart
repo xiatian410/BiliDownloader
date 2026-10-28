@@ -174,6 +174,12 @@ class SettingsPage extends StatelessWidget {
                 (v) => c.settings.danmaku = v,
               ),
               toggle('ultra', c.settings.ultra, (v) => c.settings.ultra = v),
+              toggle(
+                'autoCover',
+                c.settings.autoCover,
+                (v) => c.settings.autoCover = v,
+              ),
+              toggle('nfo', c.settings.nfo, (v) => c.settings.nfo = v),
               toggle('dolby', c.settings.dolby, (v) => c.settings.dolby = v),
               if (!kIsWeb)
                 toggle(

@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../core/bili_api.dart';
 import '../core/download_job.dart';
+import '../core/attachments.dart';
 import '../core/media_merge.dart';
 import '../core/models.dart';
 import '../core/remote_api.dart';
@@ -100,6 +101,19 @@ class RemoteDownloadQueue extends TaskQueue {
       ..addAll(
         (data['outputs'] as List).map(
           (file) => api.origin.resolve(file['url'] as String).toString(),
+        ),
+      );
+    job.outputNames
+      ..clear()
+      ..addAll(
+        (data['outputs'] as List).map((file) => file['name'] as String? ?? ''),
+      );
+    job.attachments
+      ..clear()
+      ..addAll(
+        (data['attachments'] as Map? ?? {}).map(
+          (key, value) =>
+              MapEntry(key as String, AttachmentResult.fromJson(value as Map)),
         ),
       );
   }
@@ -304,7 +318,7 @@ class RemoteDownloadQueue extends TaskQueue {
 
   @override
   void resume(DownloadJob job) {
-    if ([JobState.paused, JobState.failed].contains(job.state)) {
+    if (job.canResume) {
       unawaited(_control(job, 'resume'));
     }
   }

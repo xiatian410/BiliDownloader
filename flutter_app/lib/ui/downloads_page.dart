@@ -245,6 +245,15 @@ class _DownloadsPageState extends State<DownloadsPage> {
             error: true,
           ),
         if (job.detail.isNotEmpty) StatusBanner(s(job.detail)),
+        for (final entry in job.attachments.entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              '${s(entry.key == 'cover' ? 'autoCover' : 'nfo')}: '
+              '${s('attachment_${entry.value.state.name}')}'
+              '${entry.value.error == null ? '' : ' · ${s(entry.value.error!.key)} ${entry.value.error!.detail}'}',
+            ),
+          ),
         Wrap(
           spacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -267,6 +276,14 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     : null,
                 icon: const Icon(Icons.play_arrow_rounded),
               ),
+            if (job.state == JobState.completed && job.hasAttachmentFailures)
+              TextButton.icon(
+                onPressed: c.queue.connected && job.canResume
+                    ? () => c.queue.resume(job)
+                    : null,
+                icon: const Icon(Icons.refresh),
+                label: Text(s('retryAttachments')),
+              ),
             if (!kIsWeb)
               IconButton(
                 tooltip: s('openDirectory'),
@@ -277,12 +294,17 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 ),
                 icon: const Icon(Icons.folder_open_outlined),
               ),
-            if (kIsWeb && job.state == JobState.completed)
+            if (kIsWeb)
               for (var index = 0; index < job.outputs.length; index++)
                 TextButton.icon(
                   onPressed: () => launchUrl(Uri.parse(job.outputs[index])),
                   icon: const Icon(Icons.file_download_outlined),
-                  label: Text('${s('downloadFile')} ${index + 1}'),
+                  label: Text(
+                    '${s('downloadFile')} ${index + 1}'
+                    '${job.outputNames.length > index ? ' · ${job.outputNames[index]}' : ''}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
             if (platform.isAndroid &&
                 job.state == JobState.completed &&

@@ -109,6 +109,11 @@ const { EventEmitter } = require('node:events');
       if (mode !== '仅弹幕') {
         await page.getByRole('button', { name: '获取可用画质', exact: true }).click();
       }
+      if (aid === 8) {
+        await page.getByRole('button', { name: /附加文件/ }).click();
+        await page.getByRole('checkbox', { name: '自动保存封面', exact: true }).click();
+        await page.getByRole('checkbox', { name: '媒体信息（NFO）', exact: true }).click();
+      }
       let submitted;
       if (dropResponse) {
         // Suppress the independent acknowledgement as well as the HTTP reply.
@@ -138,7 +143,7 @@ const { EventEmitter } = require('node:events');
       return job.id;
     }
     async function saveOutput(name) {
-      const button = page.getByRole('button', { name: '下载文件 1', exact: true });
+      const button = page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ });
       await button.waitFor({ timeout: 30000 });
       const downloaded = observe(page.waitForEvent('download'));
       await button.click();
@@ -163,10 +168,10 @@ const { EventEmitter } = require('node:events');
     await page.screenshot({ path: path.join(output, 'desktop-new.png') });
     await page.getByRole('button', { name: '获取可用画质', exact: true }).click();
     await page.getByRole('button', { name: '加入下载队列 (1)', exact: true }).click();
-    await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor({ timeout: 30000 });
+    await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).waitFor({ timeout: 30000 });
     await page.screenshot({ path: path.join(output, 'desktop-task.png') });
     const downloadPromise = observe(page.waitForEvent('download'));
-    await page.getByRole('button', { name: '下载文件 1', exact: true }).click();
+    await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).click();
     const download = await downloadPromise;
     const file = path.join(output, download.suggestedFilename());
     await download.saveAs(file);
@@ -176,7 +181,7 @@ const { EventEmitter } = require('node:events');
     await page.reload({ waitUntil: 'networkidle' });
     await semantics();
     await page.getByText('下载任务', { exact: true }).click();
-    await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor();
+    await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).waitFor();
     if (fixture) {
       const restarted = waitForFixture('Fixture restarted:');
       fixture.stdin.write('restart\n');
@@ -184,9 +189,9 @@ const { EventEmitter } = require('node:events');
       await page.reload({ waitUntil: 'networkidle' });
       await semantics();
       await page.getByText('下载任务', { exact: true }).click();
-      await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor();
+      await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).waitFor();
       const afterRestartPromise = observe(page.waitForEvent('download'));
-      await page.getByRole('button', { name: '下载文件 1', exact: true }).click();
+      await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).click();
       const afterRestart = await afterRestartPromise;
       const recoveredFile = path.join(output, 'recovered.mp4');
       await afterRestart.saveAs(recoveredFile);
@@ -266,6 +271,57 @@ const { EventEmitter } = require('node:events');
     assert.equal(restored.jobs.filter(j => j.episode.aid === 7).length, 1);
     console.log('Browser: lost create response recovered without a duplicate task.');
 
+    const attachmentId = await createJob(8);
+    const partialAttachments = await waitForJob(attachmentId, j => j.state === 'completed');
+    assert.equal(partialAttachments.attachments.cover.state, 'failed');
+    assert.equal(partialAttachments.attachments.nfo.state, 'completed');
+    assert.equal(partialAttachments.outputs.length, 2);
+    const mediaBeforeRetry = mediaRequests.filter(r => r.aid === '8').length;
+    await page.getByRole('button', { name: '重做失败附件', exact: true }).click();
+    const withAttachments = await waitForJob(attachmentId,
+      j => j.state === 'completed' && j.attachments.cover.state === 'completed');
+    assert.equal(mediaRequests.filter(r => r.aid === '8').length, mediaBeforeRetry);
+    assert.equal(withAttachments.outputs.length, 3);
+    assert.equal(withAttachments.attachments.cover.output, undefined);
+    assert.equal(withAttachments.attachments.nfo.output, undefined);
+    if (fixture) {
+      const restarted = observe(waitForFixture('Fixture restarted:'));
+      fixture.stdin.write('restart\n');
+      await restarted;
+      await page.reload({ waitUntil: 'networkidle' });
+      await semantics();
+      await page.getByRole('button', { name: '下载任务', exact: true }).click();
+      await typeInto(page.getByRole('textbox'), 'AV8');
+      await page.getByRole('button', { name: /^下载文件 3(?: ·|$)/ }).waitFor();
+      const recovered = await waitForJob(attachmentId,
+        j => j.state === 'completed' && j.attachments.cover.state === 'completed');
+      assert.deepEqual(recovered.outputs, withAttachments.outputs);
+    }
+    for (const file of withAttachments.outputs) {
+      const response = await context.request.get(`${origin}${file.url}`);
+      assert.equal(response.status(), 200);
+      if (file.name.endsWith('.nfo')) {
+        const nfo = await response.text();
+        const parsed = await page.evaluate(text => {
+          const doc = new DOMParser().parseFromString(text, 'application/xml');
+          return { error: !!doc.querySelector('parsererror'), id: doc.querySelector('uniqueid')?.textContent,
+            plot: doc.querySelector('plot')?.textContent };
+        }, nfo);
+        assert.deepEqual(parsed, { error: false, id: 'av8-1008', plot: '附件样本 & <xml>\n第二行' });
+      } else if (file.name.endsWith('.png')) {
+        assert.equal((await response.body()).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+      }
+    }
+    await page.screenshot({ path: path.join(output, 'desktop-attachments.png') });
+    await page.setViewportSize({ width: 360, height: 800 });
+    const mobileCoverDownload = observe(page.waitForEvent('download'));
+    await page.getByRole('button', { name: /^下载文件 3(?: ·|$)/ }).click();
+    await (await mobileCoverDownload).saveAs(path.join(output, 'mobile-poster.png'));
+    execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', path.join(output, 'mobile-poster.png'), '-f', 'null', '-']);
+    await page.screenshot({ path: path.join(output, 'mobile-attachments.png') });
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    console.log('Browser: attachment retry preserves media and exports correctly named PNG and NFO.');
+
     for (const name of ['resumed.mp4', 'retried.mp4', 'reconnected.mp4', 'lost-response-recovered.mp4']) {
       if (!fixture && ['resumed.mp4', 'reconnected.mp4'].includes(name)) continue;
       execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', path.join(output, name), '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-']);
@@ -344,7 +400,8 @@ const { EventEmitter } = require('node:events');
         };
       }), ids);
       assert.equal(completed.length, 8);
-      assert.ok(completed.every(j => j.outputs.length === 1));
+      assert.ok(completed.every(j => j.outputs.length === 3 &&
+        j.attachments.cover.state === 'completed' && j.attachments.nfo.state === 'completed'));
       await page.goto(origin, { waitUntil: 'networkidle' });
       await semantics();
       await page.getByRole('button', { name: '下载任务', exact: true }).click();
@@ -362,6 +419,9 @@ const { EventEmitter } = require('node:events');
       failedTaskResumed: true, partialByteResume: !!fixture, disconnectedTaskReconnected: !!fixture,
       lostCreateResponseRecovered: true,
       queuedBatchSurvivedBrowserRestart, backgroundBatchCount: fixture ? 8 : 0,
+      attachmentsRetriedWithoutMedia: true, namedPngAndNfoExported: true,
+      mobileCoverDownloadedAndDecoded: true,
+      attachmentServiceRestartPreserved: !!fixture, backgroundBatchAttachmentCount: fixture ? 16 : 0,
       mediaRequests }, null, 2));
     for (const name of ['failure.png', 'failure-aria.txt', 'failure-network.json', 'failure-inputs.json']) fs.rmSync(path.join(output, name), { force: true });
     console.log(`Browser fixture passed: batch partial failure, download, FFmpeg merge, file export, refresh recovery, QR login, audio/comments, failure recovery, mobile rendering${fixture ? ', service restart, partial byte resume, WebSocket reconnect' : ''}.`);

@@ -8,11 +8,26 @@ import 'package:bili_downloader/core/bili_api.dart';
 import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/server/web_service.dart';
 import 'package:bili_downloader/server/access_policy.dart';
+import 'package:bili_downloader/core/attachments.dart';
 
 class BrowserFixtureApi extends BiliApi {
   BrowserFixtureApi(this.origin);
   final String origin;
   bool failedOnce = false;
+  bool failedCover = false;
+  @override
+  Future<CoverImage> fetchCover(String url, {CancelToken? cancel}) async {
+    if (url.endsWith('/8.jpg') && !failedCover) {
+      failedCover = true;
+      throw const AppFailure('httpError', '503');
+    }
+    return CoverImage(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=',
+      ),
+    );
+  }
+
   @override
   Future<VideoInfo> resolve(VideoId id, {CancelToken? cancel}) async {
     if (id.value == '412') throw const AppFailure('httpError', '412');
@@ -30,6 +45,9 @@ class BrowserFixtureApi extends BiliApi {
           name: '视频与音频合并',
           title: '跨端下载验证 · ${id.label}',
           bvid: id.kind == VideoKind.bv ? id.label : '',
+          cover: 'https://i0.hdslb.com/${id.value}.jpg',
+          description: '附件样本 & <xml>\n第二行',
+          author: 'Local fixture',
         ),
       ],
     );

@@ -243,6 +243,8 @@ void main() {
         await c.initialize();
         c.settings.theme = theme;
         c.settings.locale = theme == 'dark' ? 'en' : 'zh';
+        c.settings.autoCover = true;
+        c.settings.nfo = true;
         await tester.pumpWidget(BiliDownloaderApp(controller: c));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
@@ -264,6 +266,19 @@ void main() {
         );
         await tester.pumpAndSettle();
         await c.loadOptions();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(
+          find.byKey(const PageStorageKey('download-attachments')),
+          350,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const PageStorageKey('new-download-scroll')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.tap(find.text(theme == 'dark' ? 'Attachments' : '附加文件'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       });

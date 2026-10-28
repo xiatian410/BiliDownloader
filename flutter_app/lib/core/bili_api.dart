@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'models.dart';
 import 'decode.dart';
 import 'wbi.dart';
+import 'attachments.dart';
 
 const biliHeaders = <String, String>{
   'Referer': 'https://www.bilibili.com/',
@@ -139,7 +140,7 @@ class BiliApi {
       return VideoInfo(
         title: title,
         description: data['desc']?.toString() ?? '',
-        cover: data['pic']?.toString() ?? '',
+        cover: normalizeCoverUrl(data['pic']?.toString() ?? ''),
         author: data['owner']?['name']?.toString() ?? '',
         id: data['bvid'].toString(),
         episodes: pages
@@ -151,6 +152,9 @@ class BiliApi {
                 title: title,
                 bvid: data['bvid'].toString(),
                 aid: data['aid'] as int,
+                cover: normalizeCoverUrl(data['pic']?.toString() ?? ''),
+                description: data['desc']?.toString() ?? '',
+                author: data['owner']?['name']?.toString() ?? '',
               ),
             )
             .toList(),
@@ -185,6 +189,10 @@ class BiliApi {
             bvid: p.$2['bvid']?.toString() ?? '',
             aid: (p.$2['aid'] ?? 0) as int,
             epId: p.$2['id'] as int,
+            cover: normalizeCoverUrl(
+              (p.$2['cover'] ?? data['cover'])?.toString() ?? '',
+            ),
+            description: data['evaluate']?.toString() ?? '',
           ),
         )
         .toList();
@@ -192,10 +200,49 @@ class BiliApi {
     return VideoInfo(
       title: title,
       description: '${data['evaluate'] ?? ''}\n\n${data['staff'] ?? ''}'.trim(),
-      cover: data['cover']?.toString() ?? '',
+      cover: normalizeCoverUrl(data['cover']?.toString() ?? ''),
       id: 'MD${data['media_id']}',
       episodes: episodes,
     );
+  }
+
+  Future<CoverImage> fetchCover(String url, {CancelToken? cancel}) async {
+    if (url.isEmpty) throw const AppFailure('coverUnavailable');
+    final uri = Uri.tryParse(normalizeCoverUrl(url));
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        (uri.hasPort && uri.port != 443) ||
+        !(uri.host.endsWith('.hdslb.com') ||
+            uri.host.endsWith('.bilibili.com'))) {
+      throw const AppFailure('invalidCover');
+    }
+    // Never forward account cookies to the CDN or follow an unvalidated redirect.
+    final response = await dio.get<ResponseBody>(
+      uri.toString(),
+      cancelToken: cancel,
+      options: Options(
+        headers: biliHeaders,
+        responseType: ResponseType.stream,
+        followRedirects: false,
+        validateStatus: (s) => s == 200,
+      ),
+    );
+    const limit = 16 * 1024 * 1024;
+    if ((int.tryParse(response.headers.value('content-length') ?? '') ?? 0) >
+        limit) {
+      await response.data!.stream.listen(null).cancel();
+      throw const AppFailure('requestTooLarge');
+    }
+    final bytes = <int>[];
+    await for (final chunk in response.data!.stream) {
+      if (cancel?.isCancelled ?? false) throw cancel!.cancelError!;
+      if (bytes.length + chunk.length > limit) {
+        throw const AppFailure('requestTooLarge');
+      }
+      bytes.addAll(chunk);
+    }
+    return CoverImage(bytes);
   }
 
   Future<PlayableMedia> play(

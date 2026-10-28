@@ -11,6 +11,7 @@ import 'download_job.dart';
 import 'models.dart';
 import 'media_merge.dart';
 import 'process_merge.dart';
+import 'attachments.dart';
 export 'media_merge.dart';
 export 'process_merge.dart';
 
@@ -367,9 +368,83 @@ class NativeDownloadRunner implements DownloadRunner {
         job.detail = 'danmakuFailed';
       }
     }
+    await _attachments(job, dir.path, basename, temp, changed);
     job.stage = 'saving';
     changed();
     await _export(job);
+  }
+
+  Future<void> _attachments(
+    DownloadJob job,
+    String directory,
+    String basename,
+    String temp,
+    void Function() changed,
+  ) async {
+    for (final kind in [
+      if (job.options.autoCover) 'cover',
+      if (job.options.nfo) 'nfo',
+    ]) {
+      if (job.token.isCancelled) throw job.token.cancelError!;
+      final result = job.attachments.putIfAbsent(kind, AttachmentResult.new);
+      if (result.state == AttachmentState.completed) continue;
+      // A saved publication intention can outlive a process interruption.
+      if (result.output != null &&
+          job.publications.containsKey(result.output)) {
+        result.state = AttachmentState.completed;
+        result.error = null;
+        await job.checkpoint();
+        changed();
+        continue;
+      }
+      job.state = JobState.running;
+      job.stage = 'attachments';
+      job.mergeProgress = null;
+      result.state = AttachmentState.working;
+      result.error = null;
+      await job.checkpoint();
+      changed();
+      try {
+        late File temporary;
+        if (kind == 'cover') {
+          final cover = await api.fetchCover(
+            job.episode.cover,
+            cancel: job.token,
+          );
+          result.output = p.join(
+            directory,
+            '$basename-poster.${cover.extension}',
+          );
+          temporary = File('$temp.cover');
+          await temporary.writeAsBytes(cover.bytes, flush: true);
+        } else {
+          result.output = p.join(directory, '$basename.nfo');
+          temporary = File('$temp.nfo');
+          await temporary.writeAsString(videoNfo(job.episode), flush: true);
+        }
+        await _publishLocal(temporary, result.output!, job);
+        result.state = AttachmentState.completed;
+      } catch (e) {
+        if (job.token.isCancelled) {
+          result.state = AttachmentState.pending;
+          rethrow;
+        }
+        if (e is AppFailure && e.key.startsWith('history')) {
+          rethrow;
+        }
+        result.state = AttachmentState.failed;
+        result.error = e is AppFailure
+            ? e
+            : e is DioException
+            ? AppFailure(
+                e.response == null ? 'networkError' : 'httpError',
+                e.response?.statusCode?.toString() ?? e.type.name,
+              )
+            : const AppFailure('saveFailed');
+      }
+      await job.checkpoint();
+      changed();
+    }
   }
 
   Future<void> _export(DownloadJob job) async {

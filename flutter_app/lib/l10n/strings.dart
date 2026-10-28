@@ -8,6 +8,21 @@ class Strings {
   String call(String key) => _values[key]?[language == 'en' ? 1 : 0] ?? key;
 
   static const _values = <String, List<String>>{
+    'autoCover': ['自动保存封面', 'Save cover with downloads'],
+    'nfo': ['媒体信息（NFO）', 'Media information (NFO)'],
+    'attachments': ['附加文件', 'Attachments'],
+    'attachmentsHint': [
+      '可选封面与媒体信息；失败后可单独重做',
+      'Optional cover and metadata; retry failures separately',
+    ],
+    'coverFormat': ['扩展名按实际图片格式保存', 'Extension follows the image format'],
+    'attachment_pending': ['等待生成', 'Pending'],
+    'attachment_working': ['正在生成', 'Preparing'],
+    'attachment_completed': ['已生成', 'Prepared'],
+    'attachment_failed': ['未完成', 'Failed'],
+    'retryAttachments': ['重做失败附件', 'Retry failed attachments'],
+    'invalidCover': ['封面地址或图片格式无效', 'Invalid cover address or image format'],
+    'coverUnavailable': ['接口未提供封面', 'No cover provided by the source'],
     'exportFiles': ['导出文件', 'Export files'],
     'input': ['新建下载', 'New download'],
     'downloads': ['下载任务', 'Downloads'],

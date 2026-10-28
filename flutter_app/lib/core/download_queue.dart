@@ -203,7 +203,7 @@ class DownloadQueue extends TaskQueue {
   @override
   void resume(DownloadJob job) {
     if (_closed) return;
-    if (![JobState.paused, JobState.failed].contains(job.state)) return;
+    if (!job.canResume) return;
     if (persistenceError != null) {
       unawaited(_recoverPersistence(job));
       return;

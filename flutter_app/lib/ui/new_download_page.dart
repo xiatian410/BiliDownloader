@@ -455,6 +455,37 @@ class _NewDownloadPageState extends State<NewDownloadPage>
               },
             ),
           ],
+          ExpansionTile(
+            key: const PageStorageKey('download-attachments'),
+            tilePadding: EdgeInsets.zero,
+            title: Text(s('attachments')),
+            subtitle: Text(
+              [
+                if (c.settings.autoCover) s('autoCover'),
+                if (c.settings.nfo) s('nfo'),
+                if (!c.settings.autoCover && !c.settings.nfo)
+                  s('attachmentsHint'),
+              ].join(' · '),
+            ),
+            children: [
+              CheckboxListTile(
+                title: Text(s('autoCover')),
+                value: c.settings.autoCover,
+                onChanged: (v) {
+                  c.settings.autoCover = v!;
+                  c.saveSettings();
+                },
+              ),
+              CheckboxListTile(
+                title: Text(s('nfo')),
+                value: c.settings.nfo,
+                onChanged: (v) {
+                  c.settings.nfo = v!;
+                  c.saveSettings();
+                },
+              ),
+            ],
+          ),
           const Divider(height: 28),
           Text(s('directory'), style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -502,6 +533,14 @@ class _NewDownloadPageState extends State<NewDownloadPage>
                   : 'mp4'}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (c.settings.autoCover)
+              Text(
+                '${c.info!.episodes[c.selected.first].filename(limit: c.settings.limitTitle)}-poster · ${s('coverFormat')}',
+              ),
+            if (c.settings.nfo)
+              Text(
+                '${c.info!.episodes[c.selected.first].filename(limit: c.settings.limitTitle)}.nfo',
+              ),
           ],
           const SizedBox(height: 20),
           SizedBox(

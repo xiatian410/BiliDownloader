@@ -118,7 +118,7 @@ const { createInterface } = require('node:readline');
     await page.getByRole('group', { name: /跨端下载验证 · AV1/ }).waitFor();
     await page.getByRole('button', { name: '获取可用画质', exact: true }).click();
     await page.getByRole('button', { name: '加入下载队列 (1)', exact: true }).click();
-    const fileButton = page.getByRole('button', { name: '下载文件 1', exact: true });
+    const fileButton = page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ });
     await fileButton.waitFor({ timeout: 30000 });
     const downloaded = page.waitForEvent('download'); await fileButton.click();
     const file = path.join(output, 'authenticated.mp4'); await (await downloaded).saveAs(file);
@@ -145,7 +145,7 @@ const { createInterface } = require('node:readline');
     await command('restart', 'Fixture restarted:');
     await page.reload({ waitUntil: 'networkidle' }); await semantics();
     await page.getByRole('button', { name: '下载任务', exact: true }).click();
-    await page.getByRole('button', { name: '下载文件 1', exact: true }).waitFor();
+    await page.getByRole('button', { name: /^下载文件 1(?: ·|$)/ }).waitFor();
     assert.equal((await (await post('/api/session')).json()).jobs[0].id, job.id);
     console.log('Access: lock, expiry and service restart preserve the original task.');
 

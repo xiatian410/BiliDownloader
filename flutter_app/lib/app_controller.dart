@@ -264,6 +264,8 @@ class AppController extends ChangeNotifier {
     limitTitle: settings.limitTitle,
     flatDirectory: settings.flatDirectory,
     onlyDanmaku: settings.onlyDanmaku,
+    autoCover: settings.autoCover,
+    nfo: settings.nfo,
   );
 
   Future<void> resolve(String input) async {
@@ -325,23 +327,10 @@ class AppController extends ChangeNotifier {
 
   Future<void> saveCover() => perform(() async {
     if (info == null || info!.cover.isEmpty) return;
-    final response = await api.dio.get<List<int>>(
-      info!.cover,
-      options: Options(responseType: ResponseType.bytes, headers: biliHeaders),
-    );
-    final type = response.headers.value('content-type')?.split(';').first;
-    final extension = const {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'image/avif': 'avif',
-    }[type];
-    if (extension == null || response.data == null) {
-      throw const AppFailure('invalidResponse');
-    }
+    final image = await api.fetchCover(info!.cover);
     await platform.saveBytes(
-      Uint8List.fromList(response.data!),
-      '${safeFilename(info!.title)}.$extension',
+      image.bytes,
+      '${safeFilename(info!.title)}.${image.extension}',
       settings.directory,
     );
     notice = 'saved';

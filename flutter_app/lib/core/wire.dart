@@ -8,6 +8,9 @@ Map<String, dynamic> episodeToJson(Episode e) => {
   'bvid': e.bvid,
   'aid': e.aid,
   'epId': e.epId,
+  'cover': e.cover,
+  'description': e.description,
+  'author': e.author,
 };
 Episode episodeFromJson(Map<String, dynamic> m) => Episode(
   cid: m['cid'] as int,
@@ -17,6 +20,9 @@ Episode episodeFromJson(Map<String, dynamic> m) => Episode(
   bvid: m['bvid'] as String,
   aid: m['aid'] as int,
   epId: m['epId'] as int?,
+  cover: m['cover'] as String? ?? '',
+  description: m['description'] as String? ?? '',
+  author: m['author'] as String? ?? '',
 );
 Map<String, dynamic> videoToJson(VideoInfo v) => {
   'title': v.title,
@@ -50,6 +56,8 @@ Map<String, dynamic> optionsToJson(DownloadOptions o) => {
   'limitTitle': o.limitTitle,
   'flatDirectory': o.flatDirectory,
   'onlyDanmaku': o.onlyDanmaku,
+  'autoCover': o.autoCover,
+  'nfo': o.nfo,
 };
 DownloadOptions optionsFromJson(Map<String, dynamic> m, {String? directory}) {
   final quality = m['quality'];
@@ -73,6 +81,8 @@ DownloadOptions optionsFromJson(Map<String, dynamic> m, {String? directory}) {
     limitTitle: m['limitTitle'] != false,
     flatDirectory: m['flatDirectory'] == true,
     onlyDanmaku: m['onlyDanmaku'] == true,
+    autoCover: m['autoCover'] == true,
+    nfo: m['nfo'] == true,
   );
 }
 

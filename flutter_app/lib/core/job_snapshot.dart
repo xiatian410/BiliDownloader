@@ -1,6 +1,7 @@
 import 'download_job.dart';
 import 'models.dart';
 import 'wire.dart';
+import 'attachments.dart';
 
 Map<String, dynamic> jobSnapshot(DownloadJob j) => {
   'id': j.id,
@@ -20,6 +21,9 @@ Map<String, dynamic> jobSnapshot(DownloadJob j) => {
   'exportedFiles': Map.of(j.exportedFiles),
   'mediaPrepared': j.mediaPrepared,
   'commentsPrepared': j.commentsPrepared,
+  'attachments': j.attachments.map(
+    (key, value) => MapEntry(key, value.toJson(includePath: true)),
+  ),
   'expectedMediaOutputs': List.of(j.expectedMediaOutputs),
   'error': j.error == null
       ? null
@@ -77,6 +81,14 @@ DownloadJob restoreJob(Map<String, dynamic> m) {
   j.exportedFiles.addAll(Map<String, String>.from(m['exportedFiles'] ?? {}));
   j.mediaPrepared = m['mediaPrepared'] == true;
   j.commentsPrepared = m['commentsPrepared'] == true;
+  for (final entry in (m['attachments'] as Map? ?? {}).entries) {
+    j.attachments[entry.key as String] = AttachmentResult.fromJson(
+      entry.value as Map,
+    );
+    if (j.attachments[entry.key]!.state == AttachmentState.working) {
+      j.attachments[entry.key]!.state = AttachmentState.pending;
+    }
+  }
   j.expectedMediaOutputs.addAll(
     List<String>.from(m['expectedMediaOutputs'] ?? []),
   );

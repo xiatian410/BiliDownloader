@@ -59,9 +59,13 @@ class Episode {
     this.bvid = '',
     this.aid = 0,
     this.epId,
+    this.cover = '',
+    this.description = '',
+    this.author = '',
   });
   final int cid, number, aid;
   final String name, title, bvid;
+  final String cover, description, author;
   final int? epId;
   bool get isBangumi => epId != null;
   String get identity =>
@@ -286,11 +290,14 @@ class DownloadOptions {
     this.limitTitle = true,
     this.flatDirectory = false,
     this.onlyDanmaku = false,
+    this.autoCover = false,
+    this.nfo = false,
   });
   final String directory, specialAudio, language;
   final int quality, codec;
   final bool onlyAudio, reserveAudio, danmaku, ultra, dolby, limitTitle;
   final bool flatDirectory, onlyDanmaku;
+  final bool autoCover, nfo;
   int get fnval =>
       16 | 128 | 2048 | (ultra ? 64 | 1024 : 0) | (dolby ? 256 : 0);
 }
