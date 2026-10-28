@@ -12,6 +12,7 @@ import 'models.dart';
 import 'media_merge.dart';
 import 'process_merge.dart';
 import 'attachments.dart';
+import 'subtitles.dart';
 export 'media_merge.dart';
 export 'process_merge.dart';
 
@@ -369,6 +370,7 @@ class NativeDownloadRunner implements DownloadRunner {
       }
     }
     await _attachments(job, dir.path, basename, temp, changed);
+    await _subtitles(job, dir.path, basename, temp, changed);
     job.stage = 'saving';
     changed();
     await _export(job);
@@ -425,22 +427,152 @@ class NativeDownloadRunner implements DownloadRunner {
         await _publishLocal(temporary, result.output!, job);
         result.state = AttachmentState.completed;
       } catch (e) {
-        if (job.token.isCancelled) {
-          result.state = AttachmentState.pending;
-          rethrow;
+        _attachmentFailure(job, result, e);
+      }
+      await job.checkpoint();
+      changed();
+    }
+  }
+
+  void _attachmentFailure(
+    DownloadJob job,
+    AttachmentResult result,
+    Object error,
+  ) {
+    if (job.token.isCancelled) {
+      result.state = AttachmentState.pending;
+      throw job.token.cancelError!;
+    }
+    if (error is AppFailure && error.key.startsWith('history')) throw error;
+    result.state = error is AppFailure && error.key == 'subtitleEmpty'
+        ? AttachmentState.unavailable
+        : AttachmentState.failed;
+    result.error = error is AppFailure
+        ? error
+        : error is DioException
+        ? AppFailure(
+            error.response == null ? 'networkError' : 'httpError',
+            error.response?.statusCode?.toString() ?? error.type.name,
+          )
+        : const AppFailure('saveFailed');
+  }
+
+  Future<void> _subtitles(
+    DownloadJob job,
+    String directory,
+    String basename,
+    String temp,
+    void Function() changed,
+  ) async {
+    if (job.options.subtitles == 'off') return;
+    if (!validSubtitleSelection(job.options.subtitles)) {
+      throw const AppFailure('invalidSubtitleSelection');
+    }
+    if (job.token.isCancelled) throw job.token.cancelError!;
+    List<SubtitleTrack>? available;
+    job.state = JobState.running;
+    job.stage = 'attachments';
+    job.mergeProgress = null;
+    if (job.subtitleTracks.isEmpty) {
+      final group =
+          job.attachments.putIfAbsent('subtitles', AttachmentResult.new)
+            ..state = AttachmentState.working
+            ..error = null;
+      await job.checkpoint();
+      changed();
+      try {
+        available = await api.subtitles(job.episode, cancel: job.token);
+        final selected = available
+            .where(
+              (t) =>
+                  job.options.subtitles == 'all' ||
+                  t.language.toLowerCase() ==
+                      job.options.subtitles.toLowerCase(),
+            )
+            .toList();
+        if (selected.isEmpty) {
+          group.state = AttachmentState.unavailable;
+          group.error = available.isEmpty
+              ? const AppFailure('noSubtitles')
+              : AppFailure(
+                  'subtitleLanguageUnavailable',
+                  job.options.subtitles,
+                );
+        } else {
+          job.subtitleTracks.addAll(
+            selected.map((t) => SubtitleTrack.fromJson(t.toJson())),
+          );
+          job.attachments.remove('subtitles');
+          for (final track in job.subtitleTracks) {
+            job.attachments[track.key] = AttachmentResult()
+              ..label = '${track.label} [${track.language}]'
+              ..automatic = track.automatic;
+          }
         }
-        if (e is AppFailure && e.key.startsWith('history')) {
-          rethrow;
-        }
-        result.state = AttachmentState.failed;
-        result.error = e is AppFailure
-            ? e
-            : e is DioException
-            ? AppFailure(
-                e.response == null ? 'networkError' : 'httpError',
-                e.response?.statusCode?.toString() ?? e.type.name,
-              )
-            : const AppFailure('saveFailed');
+      } catch (error) {
+        _attachmentFailure(job, group, error);
+      }
+      await job.checkpoint();
+      changed();
+      if (job.subtitleTracks.isEmpty) return;
+    }
+    final pending = <SubtitleTrack>[];
+    for (final track in job.subtitleTracks) {
+      final result = job.attachments[track.key]!;
+      if (result.state == AttachmentState.completed) continue;
+      if (result.output != null &&
+          job.publications.containsKey(result.output)) {
+        result.state = AttachmentState.completed;
+        result.error = null;
+        await job.checkpoint();
+        changed();
+      } else {
+        pending.add(track);
+      }
+    }
+    if (pending.isEmpty) return;
+    try {
+      available ??= await api.subtitles(job.episode, cancel: job.token);
+    } catch (error) {
+      for (final track in pending) {
+        _attachmentFailure(job, job.attachments[track.key]!, error);
+      }
+      await job.checkpoint();
+      changed();
+      return;
+    }
+    for (final track in pending) {
+      if (job.token.isCancelled) throw job.token.cancelError!;
+      final result = job.attachments[track.key]!
+        ..state = AttachmentState.working
+        ..error = null;
+      await job.checkpoint();
+      changed();
+      try {
+        final matches = available.where(
+          (t) => t.key.toLowerCase() == track.key.toLowerCase(),
+        );
+        if (matches.isEmpty) throw const AppFailure('subtitleSourceChanged');
+        final current = matches.first;
+        if (current.locked) throw const AppFailure('subtitleLocked');
+        final content = await api.fetchSubtitle(current, cancel: job.token);
+        final duplicate =
+            job.subtitleTracks
+                .where(
+                  (t) =>
+                      t.language.toLowerCase() == track.language.toLowerCase(),
+                )
+                .length >
+            1;
+        final suffix =
+            '${track.language}${duplicate ? '.${track.id}' : ''}.srt';
+        result.output = p.join(directory, '$basename.$suffix');
+        final temporary = File('$temp.$suffix');
+        await temporary.writeAsString(content, flush: true);
+        await _publishLocal(temporary, result.output!, job);
+        result.state = AttachmentState.completed;
+      } catch (error) {
+        _attachmentFailure(job, result, error);
       }
       await job.checkpoint();
       changed();

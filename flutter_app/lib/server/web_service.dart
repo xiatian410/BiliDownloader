@@ -730,6 +730,14 @@ class WebService {
             directory: '',
           );
           _json(r, mediaToJson(await s.api.play(episode, options)));
+        case '/api/subtitles':
+          final episode = s.episodes[body['episode']];
+          if (episode == null) throw const AppFailure('noEpisodes');
+          _json(r, {
+            'tracks': (await s.api.subtitles(episode))
+                .map((t) => t.toJson())
+                .toList(),
+          });
         case '/api/login/generate':
           final qr = await s.api.generateQr();
           s.qrKeys.clear();

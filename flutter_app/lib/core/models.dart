@@ -292,12 +292,14 @@ class DownloadOptions {
     this.onlyDanmaku = false,
     this.autoCover = false,
     this.nfo = false,
+    this.subtitles = 'off',
   });
   final String directory, specialAudio, language;
   final int quality, codec;
   final bool onlyAudio, reserveAudio, danmaku, ultra, dolby, limitTitle;
   final bool flatDirectory, onlyDanmaku;
   final bool autoCover, nfo;
+  final String subtitles;
   int get fnval =>
       16 | 128 | 2048 | (ultra ? 64 | 1024 : 0) | (dolby ? 256 : 0);
 }

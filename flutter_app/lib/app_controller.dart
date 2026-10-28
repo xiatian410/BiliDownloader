@@ -13,6 +13,7 @@ import 'core/models.dart';
 import 'core/settings.dart';
 import 'core/state_store.dart';
 import 'core/service_access.dart';
+import 'core/subtitles.dart';
 import 'platform/platform.dart' as platform;
 
 abstract class AppStore {
@@ -100,6 +101,17 @@ class AppController extends ChangeNotifier {
   final Map<String, AppFailure> resolveErrors = {};
   int resolvedCount = 0, resolveTotal = 0;
   PlayableMedia? media;
+  List<SubtitleTrack> subtitlePreview = [];
+  Episode? subtitlePreviewEpisode;
+  AppFailure? subtitlePreviewError;
+  bool subtitlePreviewLoaded = false;
+  void _clearSubtitlePreview() {
+    subtitlePreview = [];
+    subtitlePreviewEpisode = null;
+    subtitlePreviewError = null;
+    subtitlePreviewLoaded = false;
+  }
+
   Set<int> selected = {};
   final Map<int, bool> audioOnlyOverrides = {};
   final Map<int, bool> danmakuOverrides = {};
@@ -124,6 +136,7 @@ class AppController extends ChangeNotifier {
             selected.clear();
             resolveErrors.clear();
             media = null;
+            _clearSubtitlePreview();
             tab = 0;
           }
           await queue.reconnect(force: true);
@@ -266,6 +279,7 @@ class AppController extends ChangeNotifier {
     onlyDanmaku: settings.onlyDanmaku,
     autoCover: settings.autoCover,
     nfo: settings.nfo,
+    subtitles: settings.subtitles,
   );
 
   Future<void> resolve(String input) async {
@@ -280,6 +294,7 @@ class AppController extends ChangeNotifier {
       sources.clear();
       resolveErrors.clear();
       info = null;
+      _clearSubtitlePreview();
       selected.clear();
       resolvedCount = 0;
       resolveTotal = batch.ids.length;
@@ -355,6 +370,25 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<void> loadSubtitles() async {
+    if (selected.isEmpty || info == null) return;
+    final episode = info!.episodes[(selected.toList()..sort()).first];
+    await perform(() async {
+      _request = CancelToken();
+      _clearSubtitlePreview();
+      subtitlePreviewEpisode = episode;
+      try {
+        subtitlePreview = await api.subtitles(episode, cancel: _request);
+        subtitlePreviewLoaded = true;
+      } catch (e) {
+        if (e is DioException && CancelToken.isCancel(e)) rethrow;
+        subtitlePreviewError = e is AppFailure
+            ? e
+            : const AppFailure('invalidSubtitle');
+      }
+    });
+  }
+
   Future<void> enqueue() async {
     if ((!kIsWeb && settings.directory.isEmpty) || selected.isEmpty) {
       fail(const AppFailure('invalidDirectory'));
@@ -372,6 +406,7 @@ class AppController extends ChangeNotifier {
       sources.clear();
       resolveErrors.clear();
       media = null;
+      _clearSubtitlePreview();
       selected = {};
       notice = null;
     });

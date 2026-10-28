@@ -14,6 +14,7 @@ Flutter migration of the Python/PySide application. The original `src/` remains 
 - FFmpeg stream-copy merge, audio-only/comment-only modes, separate audio retention and ASS comments.
 - Stable media identifiers in output names, flat or grouped directories, searchable tasks and scoped batch actions.
 - Optional automatic covers and per-part NFO metadata, with individual attachment results and retry without downloading completed media again.
+- CC subtitles as UTF-8 SRT, with explicit language preview, one-language/all-language selection and per-episode lookup. Missing tracks, login requirements and request errors remain distinct; retries preserve successful languages and media.
 - Android system folder selection/export through the Storage Access Framework.
 - Chinese/English UI; credentials use the OS credential store, never plain preferences.
 
@@ -77,7 +78,8 @@ The service binds to loopback. Remote access uses an explicitly configured HTTPS
 - The private legacy updater and Qt-specific font/style switches are not reused. Flutter has its own bundled font and rendering.
 - Native history lives in the application support directory under `history/queue.*.json`; server history lives under the download root's `.state/`. Records store media URL fingerprints, not signed URLs or credentials. Corrupt records are preserved rather than silently reset.
 - ASS currently covers ordinary scrolling/top/bottom comments; positioned/scripted comments are not converted.
-- NFO files describe each part as an independent video item. Full TV-show/season library organization, music-library metadata and subtitles remain separate work. Artwork keeps its actual JPEG/PNG/WebP/AVIF format; consumer support for each format varies.
+- NFO files describe each part as an independent video item. Full TV-show/season library organization and music-library metadata remain separate work. Artwork keeps its actual JPEG/PNG/WebP/AVIF format; consumer support for each format varies.
+- Subtitles are separate SRT files, not embedded tracks or locally generated speech transcripts. Track identity is frozen after discovery; retries refresh URLs but never substitute a different track. Signed subtitle URLs are not stored in history or sent to the browser.
 - A successful mock test or build does not prove that Bilibili permits requests from a particular IP/account. Report HTTP/API failures separately from field mapping or UI errors.
 
 To test real Linux credential storage in a private temporary keyring (requires `gnome-keyring`), run `bash scripts/test_linux_credentials.sh` from the repository root. This wrapper isolates D-Bus and XDG directories from your existing credentials.

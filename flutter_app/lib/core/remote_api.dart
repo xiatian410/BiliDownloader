@@ -6,6 +6,7 @@ import 'bili_api.dart';
 import 'models.dart';
 import 'wire.dart';
 import 'service_access.dart';
+import 'subtitles.dart';
 
 class RemoteBiliApi extends BiliApi implements ServiceAccess {
   RemoteBiliApi({Dio? client, Uri? origin})
@@ -132,6 +133,19 @@ class RemoteBiliApi extends BiliApi implements ServiceAccess {
       'options': optionsToJson(options),
     }, cancel),
   );
+  @override
+  Future<List<SubtitleTrack>> subtitles(
+    Episode episode, {
+    CancelToken? cancel,
+  }) async {
+    final data = await call('/api/subtitles', {
+      'episode': episode.identity,
+    }, cancel);
+    return (data['tracks'] as List)
+        .map((m) => SubtitleTrack.fromJson(m as Map))
+        .toList();
+  }
+
   @override
   Future<LoginQr> generateQr({CancelToken? cancel}) async {
     final data = await call('/api/login/generate', {}, cancel);

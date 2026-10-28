@@ -66,7 +66,7 @@ jobs:
         if: matrix.target == 'windows'
         working-directory: flutter_app
         run: |
-          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/web_access_test.dart test/media_merge_test.dart test/remote_runner_test.dart test/attachments_test.dart
+          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/web_access_test.dart test/media_merge_test.dart test/remote_runner_test.dart test/attachments_test.dart test/subtitles_test.dart
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test integration_test/native_smoke_test.dart -d windows
       - name: Build Linux, Android or Web

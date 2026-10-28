@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'subtitles.dart';
 
 Map<String, dynamic> episodeToJson(Episode e) => {
   'cid': e.cid,
@@ -58,8 +59,13 @@ Map<String, dynamic> optionsToJson(DownloadOptions o) => {
   'onlyDanmaku': o.onlyDanmaku,
   'autoCover': o.autoCover,
   'nfo': o.nfo,
+  'subtitles': o.subtitles,
 };
 DownloadOptions optionsFromJson(Map<String, dynamic> m, {String? directory}) {
+  final subtitles = m['subtitles'] ?? 'off';
+  if (subtitles is! String || !validSubtitleSelection(subtitles)) {
+    throw const AppFailure('invalidSubtitleSelection');
+  }
   final quality = m['quality'];
   if (quality is! int ||
       quality < 1 ||
@@ -83,6 +89,7 @@ DownloadOptions optionsFromJson(Map<String, dynamic> m, {String? directory}) {
     onlyDanmaku: m['onlyDanmaku'] == true,
     autoCover: m['autoCover'] == true,
     nfo: m['nfo'] == true,
+    subtitles: subtitles,
   );
 }
 

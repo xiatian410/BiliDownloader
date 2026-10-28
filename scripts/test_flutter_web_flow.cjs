@@ -12,6 +12,7 @@ const { EventEmitter } = require('node:events');
   fs.mkdirSync(output, { recursive: true });
   let fixture, fixtureLines, browser, page;
   const mediaRequests = [];
+  const subtitleRequests = [];
   const network = [], errors = [], jobHistory = [];
   // Attach rejection handlers immediately to waits that span a separate UI action.
   function observe(future) { future.catch(() => {}); return future; }
@@ -40,6 +41,7 @@ const { EventEmitter } = require('node:events');
       fixtureLines = createInterface({ input: fixture.stdout });
       fixtureLines.on('line', line => {
         if (line.startsWith('Fixture media: ')) mediaRequests.push(JSON.parse(line.slice(15)));
+        if (line.startsWith('Fixture subtitle: ')) subtitleRequests.push(JSON.parse(line.slice(18)));
       });
       await waitForFixture('Fixture ready:');
     }
@@ -113,6 +115,20 @@ const { EventEmitter } = require('node:events');
         await page.getByRole('button', { name: /附加文件/ }).click();
         await page.getByRole('checkbox', { name: '自动保存封面', exact: true }).click();
         await page.getByRole('checkbox', { name: '媒体信息（NFO）', exact: true }).click();
+      }
+      if (aid === 9) {
+        if (!await page.getByRole('button', { name: '查看字幕语言', exact: true }).count()) {
+          await page.getByRole('button', { name: /附加文件/ }).click();
+        }
+        const previewResponse = observe(page.waitForResponse(r => r.url().endsWith('/api/subtitles')));
+        await page.getByRole('button', { name: '查看字幕语言', exact: true }).click();
+        const preview = await (await previewResponse).json();
+        assert.equal(preview.tracks.length, 2);
+        assert.ok(preview.tracks.every(t => !t.url && !t.subtitle_url));
+        assert.ok(!JSON.stringify(preview).includes('fixture-transient'));
+        assert.equal(preview.tracks[1].automatic, true);
+        await page.getByRole('button', { name: /CC 字幕（SRT）/ }).click();
+        await page.getByRole('menuitem', { name: '全部可用语言', exact: true }).click();
       }
       let submitted;
       if (dropResponse) {
@@ -322,6 +338,44 @@ const { EventEmitter } = require('node:events');
     await page.setViewportSize({ width: 1440, height: 1080 });
     console.log('Browser: attachment retry preserves media and exports correctly named PNG and NFO.');
 
+    const subtitleId = await createJob(9);
+    const partialSubtitles = await waitForJob(subtitleId, j => j.state === 'completed');
+    assert.equal(partialSubtitles.attachments['subtitle:zh-CN:100901'].state, 'completed');
+    assert.equal(partialSubtitles.attachments['subtitle:ai-en:100902'].state, 'failed');
+    assert.equal(partialSubtitles.outputs.length, 4);
+    assert.ok(!JSON.stringify(partialSubtitles).includes('fixture-transient'));
+    const mediaBeforeSubtitles = mediaRequests.filter(r => r.aid === '9').length;
+    if (fixture) {
+      const restarted = observe(waitForFixture('Fixture restarted:'));
+      fixture.stdin.write('restart\n');
+      await restarted;
+      await page.reload({ waitUntil: 'networkidle' });
+      await semantics();
+      await page.getByRole('button', { name: '下载任务', exact: true }).click();
+      await typeInto(page.getByRole('textbox'), 'AV9');
+    }
+    await page.getByRole('button', { name: '重做失败附件', exact: true }).click();
+    const withSubtitles = await waitForJob(subtitleId,
+      j => j.state === 'completed' && j.attachments['subtitle:ai-en:100902'].state === 'completed');
+    assert.equal(withSubtitles.outputs.length, 5);
+    assert.equal(mediaRequests.filter(r => r.aid === '9').length, mediaBeforeSubtitles);
+    if (fixture) {
+      assert.equal(subtitleRequests.filter(r => r.id === '100901').length, 1);
+      assert.equal(subtitleRequests.filter(r => r.id === '100902').length, 2);
+    }
+    await page.setViewportSize({ width: 360, height: 800 });
+    const subtitleDownload = observe(page.waitForEvent('download'));
+    await page.getByRole('button', { name: /下载文件 .*\.ai-en\.srt$/ }).click();
+    const subtitleFile = path.join(output, 'mobile-subtitle.srt');
+    await (await subtitleDownload).saveAs(subtitleFile);
+    assert.ok(fs.readFileSync(subtitleFile, 'utf8').includes('字幕 100902 · ai-en &amp; &lt;sample&gt;'));
+    const subtitleProbe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', subtitleFile]));
+    assert.equal(subtitleProbe.streams[0].codec_name, 'subrip');
+    await page.screenshot({ path: path.join(output, 'mobile-subtitles.png') });
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await page.screenshot({ path: path.join(output, 'desktop-subtitles.png') });
+    console.log('Browser: subtitle languages, restart, selective retry and mobile SRT export passed.');
+
     for (const name of ['resumed.mp4', 'retried.mp4', 'reconnected.mp4', 'lost-response-recovered.mp4']) {
       if (!fixture && ['resumed.mp4', 'reconnected.mp4'].includes(name)) continue;
       execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', path.join(output, name), '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-']);
@@ -400,8 +454,9 @@ const { EventEmitter } = require('node:events');
         };
       }), ids);
       assert.equal(completed.length, 8);
-      assert.ok(completed.every(j => j.outputs.length === 3 &&
-        j.attachments.cover.state === 'completed' && j.attachments.nfo.state === 'completed'));
+      assert.ok(completed.every(j => j.outputs.length === 5 &&
+        Object.values(j.attachments).length === 4 &&
+        Object.values(j.attachments).every(a => a.state === 'completed')));
       await page.goto(origin, { waitUntil: 'networkidle' });
       await semantics();
       await page.getByRole('button', { name: '下载任务', exact: true }).click();
@@ -421,8 +476,10 @@ const { EventEmitter } = require('node:events');
       queuedBatchSurvivedBrowserRestart, backgroundBatchCount: fixture ? 8 : 0,
       attachmentsRetriedWithoutMedia: true, namedPngAndNfoExported: true,
       mobileCoverDownloadedAndDecoded: true,
-      attachmentServiceRestartPreserved: !!fixture, backgroundBatchAttachmentCount: fixture ? 16 : 0,
-      mediaRequests }, null, 2));
+      attachmentServiceRestartPreserved: !!fixture, backgroundBatchAttachmentCount: fixture ? 32 : 0,
+      subtitleLanguagesPreviewed: true, subtitleRetryPreservedMediaAndSuccessfulLanguage: true,
+      subtitleServiceRestartPreserved: !!fixture, mobileSrtExportParsed: true,
+      mediaRequests, subtitleRequests }, null, 2));
     for (const name of ['failure.png', 'failure-aria.txt', 'failure-network.json', 'failure-inputs.json']) fs.rmSync(path.join(output, name), { force: true });
     console.log(`Browser fixture passed: batch partial failure, download, FFmpeg merge, file export, refresh recovery, QR login, audio/comments, failure recovery, mobile rendering${fixture ? ', service restart, partial byte resume, WebSocket reconnect' : ''}.`);
   } catch (error) {

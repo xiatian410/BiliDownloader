@@ -11,6 +11,7 @@ import '../core/models.dart';
 import '../l10n/strings.dart';
 import '../platform/platform.dart' as platform;
 import 'widgets.dart';
+import 'subtitle_options.dart';
 
 class NewDownloadPage extends StatefulWidget {
   const NewDownloadPage({super.key, required this.controller});
@@ -463,11 +464,15 @@ class _NewDownloadPageState extends State<NewDownloadPage>
               [
                 if (c.settings.autoCover) s('autoCover'),
                 if (c.settings.nfo) s('nfo'),
-                if (!c.settings.autoCover && !c.settings.nfo)
+                if (c.settings.subtitles != 'off') s('subtitles'),
+                if (!c.settings.autoCover &&
+                    !c.settings.nfo &&
+                    c.settings.subtitles == 'off')
                   s('attachmentsHint'),
               ].join(' · '),
             ),
             children: [
+              SubtitleOptions(controller: c),
               CheckboxListTile(
                 title: Text(s('autoCover')),
                 value: c.settings.autoCover,
@@ -541,6 +546,7 @@ class _NewDownloadPageState extends State<NewDownloadPage>
               Text(
                 '${c.info!.episodes[c.selected.first].filename(limit: c.settings.limitTitle)}.nfo',
               ),
+            if (c.settings.subtitles != 'off') Text(s('subtitleFilesHint')),
           ],
           const SizedBox(height: 20),
           SizedBox(

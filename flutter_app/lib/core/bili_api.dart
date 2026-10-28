@@ -6,6 +6,7 @@ import 'models.dart';
 import 'decode.dart';
 import 'wbi.dart';
 import 'attachments.dart';
+import 'subtitles.dart';
 
 const biliHeaders = <String, String>{
   'Referer': 'https://www.bilibili.com/',
@@ -208,6 +209,55 @@ class BiliApi {
 
   Future<CoverImage> fetchCover(String url, {CancelToken? cancel}) async {
     if (url.isEmpty) throw const AppFailure('coverUnavailable');
+    return CoverImage(
+      await _cdnBytes(url, 16 * 1024 * 1024, 'invalidCover', cancel),
+    );
+  }
+
+  Future<List<SubtitleTrack>> subtitles(
+    Episode episode, {
+    CancelToken? cancel,
+  }) async => playerSubtitles(
+    await get(
+      '/x/player/wbi/v2',
+      cancel: cancel,
+      query: await _signed({
+        'cid': episode.cid,
+        if (episode.bvid.isNotEmpty)
+          'bvid': episode.bvid
+        else
+          'aid': episode.aid,
+        if (episode.epId != null) 'ep_id': episode.epId,
+      }, cancel),
+    ),
+    episode,
+  );
+
+  Future<String> fetchSubtitle(
+    SubtitleTrack track, {
+    CancelToken? cancel,
+  }) async {
+    final bytes = await _cdnBytes(
+      track.url,
+      4 * 1024 * 1024,
+      'invalidSubtitle',
+      cancel,
+    );
+    try {
+      var text = utf8.decode(bytes);
+      if (text.startsWith('\ufeff')) text = text.substring(1);
+      return subtitlesToSrt(jsonDecode(text));
+    } on FormatException {
+      throw const AppFailure('invalidSubtitle');
+    }
+  }
+
+  Future<List<int>> _cdnBytes(
+    String url,
+    int limit,
+    String invalidKey,
+    CancelToken? cancel,
+  ) async {
     final uri = Uri.tryParse(normalizeCoverUrl(url));
     if (uri == null ||
         uri.scheme != 'https' ||
@@ -215,7 +265,7 @@ class BiliApi {
         (uri.hasPort && uri.port != 443) ||
         !(uri.host.endsWith('.hdslb.com') ||
             uri.host.endsWith('.bilibili.com'))) {
-      throw const AppFailure('invalidCover');
+      throw AppFailure(invalidKey);
     }
     // Never forward account cookies to the CDN or follow an unvalidated redirect.
     final response = await dio.get<ResponseBody>(
@@ -228,7 +278,6 @@ class BiliApi {
         validateStatus: (s) => s == 200,
       ),
     );
-    const limit = 16 * 1024 * 1024;
     if ((int.tryParse(response.headers.value('content-length') ?? '') ?? 0) >
         limit) {
       await response.data!.stream.listen(null).cancel();
@@ -242,7 +291,7 @@ class BiliApi {
       }
       bytes.addAll(chunk);
     }
-    return CoverImage(bytes);
+    return bytes;
   }
 
   Future<PlayableMedia> play(
@@ -272,6 +321,16 @@ class BiliApi {
         ? episode.bvid
         : episode.aid;
     if (options.language.isNotEmpty) params['cur_language'] = options.language;
+    params = await _signed(params, cancel);
+    return PlayableMedia.fromJson(
+      await get('/x/player/wbi/playurl', query: params, cancel: cancel),
+    );
+  }
+
+  Future<Map<String, dynamic>> _signed(
+    Map<String, dynamic> params,
+    CancelToken? cancel,
+  ) async {
     if (_wbi == null) {
       final nav = await get(
         '/x/web-interface/nav',
@@ -284,10 +343,7 @@ class BiliApi {
       if (images is! Map) throw const AppFailure('invalidResponse');
       _wbi = (key(images['img_url']), key(images['sub_url']));
     }
-    params = signWbi(params, _wbi!.$1, _wbi!.$2);
-    return PlayableMedia.fromJson(
-      await get('/x/player/wbi/playurl', query: params, cancel: cancel),
-    );
+    return signWbi(params, _wbi!.$1, _wbi!.$2);
   }
 
   Future<LoginQr> generateQr({CancelToken? cancel}) async {

@@ -8,12 +8,58 @@ class Strings {
   String call(String key) => _values[key]?[language == 'en' ? 1 : 0] ?? key;
 
   static const _values = <String, List<String>>{
+    'subtitles': ['CC 字幕（SRT）', 'CC subtitles (SRT)'],
+    'subtitlesOff': ['不下载字幕', 'Do not download subtitles'],
+    'allSubtitleLanguages': ['全部可用语言', 'All available languages'],
+    'automaticSubtitle': ['自动生成', 'Auto-generated'],
+    'previewSubtitles': ['查看字幕语言', 'Check subtitle languages'],
+    'subtitlePreview': ['字幕预览分集', 'Subtitle preview episode'],
+    'subtitleSelectionHint': [
+      '预览第一个已选分集；下载时逐分集检查，指定语言不会自动换成其他语言。',
+      'Preview the first selected episode. Each download checks its own tracks; a chosen language is never replaced automatically.',
+    ],
+    'subtitleFilesHint': [
+      '字幕保存为相同基本名加语言的 .srt；同语言多轨追加轨道 ID。',
+      'SRT files share the media base name plus language; multiple tracks of one language also include a track ID.',
+    ],
+    'noSubtitles': ['接口未提供字幕', 'No subtitles provided by the source'],
+    'subtitleEmpty': ['字幕轨道没有文本', 'The subtitle track has no cues'],
+    'subtitleLanguageUnavailable': [
+      '此分集没有所选字幕语言',
+      'This episode does not provide the selected subtitle language',
+    ],
+    'subtitleLoginRequired': [
+      '接口要求先登录 B站才能查看字幕',
+      'The source requires Bilibili sign-in to view subtitles',
+    ],
+    'subtitleLocked': [
+      '此字幕轨道尚未获准访问',
+      'Access to this subtitle track is restricted',
+    ],
+    'subtitleIdentityMismatch': [
+      '字幕信息与当前分集不符',
+      'Subtitle metadata belongs to a different episode',
+    ],
+    'subtitleSourceChanged': [
+      '原字幕轨道已变更或不再提供',
+      'The original subtitle track changed or is no longer available',
+    ],
+    'invalidSubtitle': [
+      '字幕字段、时间或资源格式无效',
+      'Invalid subtitle fields, timing, or resource format',
+    ],
+    'invalidSubtitleSelection': [
+      '字幕语言选择无效',
+      'Invalid subtitle language selection',
+    ],
+    'attachment_unavailable': ['未提供', 'Unavailable'],
+    'recheckAttachments': ['重新检查附件', 'Recheck attachments'],
     'autoCover': ['自动保存封面', 'Save cover with downloads'],
     'nfo': ['媒体信息（NFO）', 'Media information (NFO)'],
     'attachments': ['附加文件', 'Attachments'],
     'attachmentsHint': [
-      '可选封面与媒体信息；失败后可单独重做',
-      'Optional cover and metadata; retry failures separately',
+      '可选字幕、封面与媒体信息；失败后可单独重做',
+      'Optional subtitles, cover and metadata; retry failures separately',
     ],
     'coverFormat': ['扩展名按实际图片格式保存', 'Extension follows the image format'],
     'attachment_pending': ['等待生成', 'Pending'],

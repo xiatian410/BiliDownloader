@@ -249,7 +249,13 @@ class _DownloadsPageState extends State<DownloadsPage> {
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
-              '${s(entry.key == 'cover' ? 'autoCover' : 'nfo')}: '
+              '${s(entry.key == 'cover'
+                  ? 'autoCover'
+                  : entry.key == 'nfo'
+                  ? 'nfo'
+                  : 'subtitles')}'
+              '${entry.value.label.isEmpty ? '' : ' · ${entry.value.label}'}'
+              '${entry.value.automatic ? ' · ${s('automaticSubtitle')}' : ''}: '
               '${s('attachment_${entry.value.state.name}')}'
               '${entry.value.error == null ? '' : ' · ${s(entry.value.error!.key)} ${entry.value.error!.detail}'}',
             ),
@@ -276,13 +282,19 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     : null,
                 icon: const Icon(Icons.play_arrow_rounded),
               ),
-            if (job.state == JobState.completed && job.hasAttachmentFailures)
+            if (job.state == JobState.completed && job.hasRetryableAttachments)
               TextButton.icon(
                 onPressed: c.queue.connected && job.canResume
                     ? () => c.queue.resume(job)
                     : null,
                 icon: const Icon(Icons.refresh),
-                label: Text(s('retryAttachments')),
+                label: Text(
+                  s(
+                    job.hasAttachmentFailures
+                        ? 'retryAttachments'
+                        : 'recheckAttachments',
+                  ),
+                ),
               ),
             if (!kIsWeb)
               IconButton(

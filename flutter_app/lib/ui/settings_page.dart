@@ -7,6 +7,7 @@ import '../l10n/strings.dart';
 import '../platform/platform.dart' as platform;
 import 'login_dialog.dart';
 import 'widgets.dart';
+import 'subtitle_options.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.controller});
@@ -180,6 +181,7 @@ class SettingsPage extends StatelessWidget {
                 (v) => c.settings.autoCover = v,
               ),
               toggle('nfo', c.settings.nfo, (v) => c.settings.nfo = v),
+              SubtitleOptions(controller: c, preview: false),
               toggle('dolby', c.settings.dolby, (v) => c.settings.dolby = v),
               if (!kIsWeb)
                 toggle(

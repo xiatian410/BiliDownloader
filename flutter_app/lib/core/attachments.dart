@@ -4,7 +4,7 @@ import 'package:xml/xml.dart';
 
 import 'models.dart';
 
-enum AttachmentState { pending, working, completed, failed }
+enum AttachmentState { pending, working, completed, failed, unavailable }
 
 String normalizeCoverUrl(String value) {
   final uri = Uri.tryParse(value.startsWith('//') ? 'https:$value' : value);
@@ -22,9 +22,13 @@ class AttachmentResult {
   AttachmentState state = AttachmentState.pending;
   String? output;
   AppFailure? error;
+  String label = '';
+  bool automatic = false;
 
   Map<String, dynamic> toJson({bool includePath = false}) => {
     'state': state.name,
+    if (label.isNotEmpty) 'label': label,
+    if (automatic) 'automatic': true,
     if (includePath) 'output': output,
     if (error != null) 'error': {'key': error!.key, 'detail': error!.detail},
   };
@@ -32,6 +36,8 @@ class AttachmentResult {
   static AttachmentResult fromJson(Map m) => AttachmentResult()
     ..state = AttachmentState.values.byName(m['state'] as String)
     ..output = m['output'] as String?
+    ..label = m['label'] as String? ?? ''
+    ..automatic = m['automatic'] == true
     ..error = m['error'] == null
         ? null
         : AppFailure(

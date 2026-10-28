@@ -9,12 +9,52 @@ import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/server/web_service.dart';
 import 'package:bili_downloader/server/access_policy.dart';
 import 'package:bili_downloader/core/attachments.dart';
+import 'package:bili_downloader/core/subtitles.dart';
 
 class BrowserFixtureApi extends BiliApi {
   BrowserFixtureApi(this.origin);
   final String origin;
   bool failedOnce = false;
   bool failedCover = false;
+  static bool failedEnglish = false;
+  @override
+  Future<List<SubtitleTrack>> subtitles(
+    Episode episode, {
+    CancelToken? cancel,
+  }) async => [
+    for (final language in ['zh-CN', 'ai-en'])
+      SubtitleTrack(
+        id: '${episode.cid}${language == 'zh-CN' ? '01' : '02'}',
+        language: language,
+        label: language == 'zh-CN' ? '中文' : '英语（自动生成）',
+        automatic: language == 'ai-en',
+        url:
+            'https://aisubtitle.hdslb.com/${episode.cid}.json?token=fixture-transient',
+      ),
+  ];
+  @override
+  Future<String> fetchSubtitle(
+    SubtitleTrack track, {
+    CancelToken? cancel,
+  }) async {
+    stdout.writeln(
+      'Fixture subtitle: ${jsonEncode({'id': track.id, 'language': track.language})}',
+    );
+    if (track.id == '100902' && !failedEnglish) {
+      failedEnglish = true;
+      throw const AppFailure('httpError', '503');
+    }
+    return subtitlesToSrt({
+      'body': [
+        {
+          'from': .125,
+          'to': .875,
+          'content': '字幕 ${track.id} · ${track.language} & <sample>',
+        },
+      ],
+    });
+  }
+
   @override
   Future<CoverImage> fetchCover(String url, {CancelToken? cancel}) async {
     if (url.endsWith('/8.jpg') && !failedCover) {

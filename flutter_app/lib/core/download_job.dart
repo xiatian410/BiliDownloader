@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'models.dart';
 import 'media_merge.dart';
 import 'attachments.dart';
+import 'subtitles.dart';
 
 enum JobState {
   submitting,
@@ -43,12 +44,17 @@ class DownloadJob {
   // Remote queues receive display names separately from opaque download URLs.
   final List<String> outputNames = [];
   final Map<String, AttachmentResult> attachments = {};
+  // Only track identity and labels are durable; signed URLs are reacquired.
+  final List<SubtitleTrack> subtitleTracks = [];
   bool get hasAttachmentFailures =>
       attachments.values.any((a) => a.state == AttachmentState.failed);
+  bool get hasRetryableAttachments =>
+      hasAttachmentFailures ||
+      attachments.values.any((a) => a.state == AttachmentState.unavailable);
   bool get canResume =>
       !controlPending &&
       ([JobState.paused, JobState.failed].contains(state) ||
-          (state == JobState.completed && hasAttachmentFailures));
+          (state == JobState.completed && hasRetryableAttachments));
   final List<String> pendingExports = [];
   final Map<String, Publication> publications = {};
   final Map<String, String> exportedFiles = {};

@@ -10,11 +10,29 @@ import 'package:bili_downloader/core/download_queue.dart';
 import 'package:bili_downloader/core/download_job.dart';
 import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/core/remote_api.dart';
+import 'package:bili_downloader/core/subtitles.dart';
 import 'package:bili_downloader/ui/widgets.dart';
 
 import 'support.dart';
 
 class WizardApi extends FixtureApi {
+  bool failSubtitles = false;
+  @override
+  Future<List<SubtitleTrack>> subtitles(
+    Episode episode, {
+    CancelToken? cancel,
+  }) async {
+    if (failSubtitles) throw const AppFailure('subtitleLoginRequired');
+    return const [
+      SubtitleTrack(
+        id: '1',
+        language: 'ai-zh',
+        label: '中文（自动生成）',
+        automatic: true,
+      ),
+    ];
+  }
+
   @override
   Future<VideoInfo> resolve(VideoId id, {CancelToken? cancel}) async =>
       FixtureApi.video;
@@ -38,6 +56,37 @@ void main() {
       ..addFont(rootBundle.load('assets/HarmonyOS_Sans_SC_Regular.ttf'));
     await font.load();
   });
+  testWidgets(
+    'subtitle preview failure stays local and a selected language is frozen in the task',
+    (tester) async {
+      final api = WizardApi()..failSubtitles = true;
+      final c = AppController(
+        api: api,
+        queue: DownloadQueue(CompletedRunner()),
+        store: MemoryStore(),
+      );
+      addTearDown(c.dispose);
+      await c.initialize();
+      await c.resolve('av1');
+      await c.loadOptions();
+      await c.loadSubtitles();
+      expect(c.subtitlePreviewError!.key, 'subtitleLoginRequired');
+      expect(c.step, 3);
+      expect(c.media, isNotNull);
+      api.failSubtitles = false;
+      await c.loadSubtitles();
+      expect(c.subtitlePreviewError, isNull);
+      expect(c.subtitlePreviewEpisode!.cid, c.info!.episodes.first.cid);
+      c.settings.subtitles = 'ai-zh';
+      await c.enqueue();
+      c.settings.subtitles = 'off';
+      expect(c.queue.jobs.first.options.subtitles, 'ai-zh');
+      expect(c.subtitlePreview, isEmpty);
+      await tester.pumpWidget(BiliDownloaderApp(controller: c));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('status messages are announced as readable live regions', (
     tester,
   ) async {
@@ -245,6 +294,7 @@ void main() {
         c.settings.locale = theme == 'dark' ? 'en' : 'zh';
         c.settings.autoCover = true;
         c.settings.nfo = true;
+        c.settings.subtitles = 'ai-zh';
         await tester.pumpWidget(BiliDownloaderApp(controller: c));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
@@ -266,6 +316,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         await c.loadOptions();
+        await c.loadSubtitles();
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         await tester.scrollUntilVisible(

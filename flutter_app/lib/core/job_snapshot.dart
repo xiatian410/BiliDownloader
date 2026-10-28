@@ -2,6 +2,7 @@ import 'download_job.dart';
 import 'models.dart';
 import 'wire.dart';
 import 'attachments.dart';
+import 'subtitles.dart';
 
 Map<String, dynamic> jobSnapshot(DownloadJob j) => {
   'id': j.id,
@@ -21,6 +22,7 @@ Map<String, dynamic> jobSnapshot(DownloadJob j) => {
   'exportedFiles': Map.of(j.exportedFiles),
   'mediaPrepared': j.mediaPrepared,
   'commentsPrepared': j.commentsPrepared,
+  'subtitleTracks': j.subtitleTracks.map((t) => t.toJson()).toList(),
   'attachments': j.attachments.map(
     (key, value) => MapEntry(key, value.toJson(includePath: true)),
   ),
@@ -81,6 +83,11 @@ DownloadJob restoreJob(Map<String, dynamic> m) {
   j.exportedFiles.addAll(Map<String, String>.from(m['exportedFiles'] ?? {}));
   j.mediaPrepared = m['mediaPrepared'] == true;
   j.commentsPrepared = m['commentsPrepared'] == true;
+  j.subtitleTracks.addAll(
+    (m['subtitleTracks'] as List? ?? []).map(
+      (m) => SubtitleTrack.fromJson(m as Map),
+    ),
+  );
   for (final entry in (m['attachments'] as Map? ?? {}).entries) {
     j.attachments[entry.key as String] = AttachmentResult.fromJson(
       entry.value as Map,

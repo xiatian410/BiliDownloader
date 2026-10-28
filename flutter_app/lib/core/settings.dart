@@ -1,3 +1,5 @@
+import 'subtitles.dart';
+
 class AppSettings {
   String directory = '';
   String locale = 'zh';
@@ -14,6 +16,7 @@ class AppSettings {
   bool onlyDanmaku = false;
   bool autoCover = false;
   bool nfo = false;
+  String subtitles = 'off';
   String theme = 'system';
   // A non-secret hint detects cleared ownership cookies; it grants no access.
   String serviceWorkspace = '';
@@ -34,6 +37,7 @@ class AppSettings {
     'onlyDanmaku': onlyDanmaku,
     'autoCover': autoCover,
     'nfo': nfo,
+    'subtitles': subtitles,
     'theme': theme,
     'serviceWorkspace': serviceWorkspace,
   };
@@ -61,6 +65,10 @@ class AppSettings {
     s.onlyDanmaku = data['onlyDanmaku'] == true;
     s.autoCover = data['autoCover'] == true;
     s.nfo = data['nfo'] == true;
+    if (data['subtitles'] is String &&
+        validSubtitleSelection(data['subtitles'] as String)) {
+      s.subtitles = data['subtitles'] as String;
+    }
     if (['system', 'light', 'dark'].contains(data['theme'])) {
       s.theme = data['theme'] as String;
     }
