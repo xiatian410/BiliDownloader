@@ -144,6 +144,45 @@ void main() {
       await unsafe.close();
     },
   );
+  test(
+    'canonical roots accept directory aliases but reject data under static assets',
+    () async {
+      final realWeb = '${temp.path}/web';
+      final realData = '${temp.path}/aliased-data';
+      await Directory(realData).create();
+      await Link('${temp.path}/web-link').create(realWeb);
+      await Link('${temp.path}/data-link').create(realData);
+      final aliased = WebService(
+        webRoot: '${temp.path}/web-link',
+        downloadRoot: '${temp.path}/data-link',
+      );
+      try {
+        await aliased.start(port: 0);
+        final request = await client.getUrl(Uri.parse(aliased.origin));
+        final response = await request.close();
+        expect(response.statusCode, 200);
+        expect(await utf8.decoder.bind(response).join(), 'fixture');
+      } finally {
+        await aliased.close();
+      }
+      await Directory('$realWeb/private').create();
+      await Link('${temp.path}/private-link').create('$realWeb/private');
+      final overlapping = WebService(
+        webRoot: realWeb,
+        downloadRoot: '${temp.path}/private-link',
+      );
+      await expectLater(
+        overlapping.start(port: 0),
+        throwsA(
+          isA<AppFailure>().having((e) => e.key, 'key', 'invalidDirectory'),
+        ),
+      );
+      await overlapping.close();
+    },
+    skip: Platform.isWindows
+        ? 'Windows file-byte test covers native short-path aliases; symlinks need host privilege.'
+        : false,
+  );
 
   test('same-origin service resolves, streams task events and returns exact file bytes', () async {
     final resolved = await post('/api/resolve', {'input': 'av1'});

@@ -42,6 +42,7 @@ class WebService {
        webRoot = p.normalize(p.absolute(webRoot)),
        downloadRoot = p.normalize(p.absolute(downloadRoot));
   final String webRoot, downloadRoot;
+  late final String _realWebRoot, _realDownloadRoot;
   final BiliApi Function() apiFactory;
   final _sessions = <String, _Session>{};
   final _random = Random.secure();
@@ -58,6 +59,13 @@ class WebService {
       throw const AppFailure('invalidDirectory');
     }
     await Directory(downloadRoot).create(recursive: true);
+    // Both sides of containment checks must resolve Windows short names and symlinks.
+    _realWebRoot = await Directory(webRoot).resolveSymbolicLinks();
+    _realDownloadRoot = await Directory(downloadRoot).resolveSymbolicLinks();
+    if (_realWebRoot == _realDownloadRoot ||
+        p.isWithin(_realWebRoot, _realDownloadRoot)) {
+      throw const AppFailure('invalidDirectory');
+    }
     _lease = FileStateStore(p.join(downloadRoot, '.state', 'service'));
     await _lease!.read();
     final directory = Directory(p.join(downloadRoot, '.state'));
@@ -429,7 +437,7 @@ class WebService {
         final file = File(job.outputs[index]);
         if (!await file.exists() ||
             !p.isWithin(
-              p.join(downloadRoot, s.id),
+              p.join(_realDownloadRoot, s.id),
               await file.resolveSymbolicLinks(),
             )) {
           _json(r, {'error': 'notFound'}, status: 404);
@@ -584,7 +592,7 @@ class WebService {
     }
     final file = File(path);
     if (!await file.exists() ||
-        !p.isWithin(root, await file.resolveSymbolicLinks())) {
+        !p.isWithin(_realWebRoot, await file.resolveSymbolicLinks())) {
       r.response.statusCode = 404;
       return;
     }

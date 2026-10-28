@@ -10,6 +10,7 @@ import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/core/state_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:bili_downloader/platform/platform_native.dart' as platform;
 
 class MemoryStore implements StateStore {
@@ -117,7 +118,18 @@ void main() {
   test(
     'OS lock rejects a second writer and force-kill preserves committed data',
     () async {
-      final child = await Process.start('dart', [
+      // Invoke the actual executable, not dart.bat, so the killed PID owns the lock.
+      final flutterRoot = Platform.environment['FLUTTER_ROOT'];
+      if (flutterRoot == null) throw StateError('Run using flutter test');
+      final dart = p.join(
+        flutterRoot,
+        'bin',
+        'cache',
+        'dart-sdk',
+        'bin',
+        Platform.isWindows ? 'dart.exe' : 'dart',
+      );
+      final child = await Process.start(dart, [
         'run',
         'test/fixtures/state_writer.dart',
         path,
