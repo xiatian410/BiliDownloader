@@ -21,7 +21,11 @@
 
 连接中断保留最后收到的任务状态，提示后台状态暂时未知；重新连接使用服务端完整快照同步。关闭页面只释放连接，不暂停服务端工作。批量提交使用稳定提交标识，HTTP 响应丢失时可由事件确认；两个通道都未确认时，重试仍返回原任务。初始化期间关闭页面不会继续提交任务或设置。
 
-本地验证：82 项 Flutter 测试、静态分析、格式与差异检查通过；Linux 原生窗口与内置 FFmpeg 集成通过。新增测试覆盖整批校验失败、历史写入失败、8 项任务跨服务重启恢复、并发设置响应乱序，以及关闭页面时的连接清理。Chrome 完整流程通过：8 项中有 1 项运行、7 项排队时关闭整个浏览器进程，服务端随后完成全部任务；重新打开 Flutter 页面取回最后一项，音视频解码通过。截图及 `browser-result.json` 保留在 `artifacts/rewrite/`。本增量的四平台远程构建尚待完成，不能沿用下方旧提交的构建结果。
+本地验证：82 项 Flutter 测试、静态分析、格式与差异检查通过；Linux 原生窗口与内置 FFmpeg 集成通过。新增测试覆盖整批校验失败、历史写入失败、8 项任务跨服务重启恢复、并发设置响应乱序，以及关闭页面时的连接清理。Chrome 完整流程通过：8 项中有 1 项运行、7 项排队时关闭整个浏览器进程，服务端随后完成全部任务；重新打开 Flutter 页面取回最后一项，音视频解码通过。截图及 `browser-result.json` 保留在 `artifacts/rewrite/`。
+
+功能提交 `5e79c2d` 已推送，新的 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40669497128) 四项全部成功。Linux 82 项测试、原生窗口/FFmpeg 集成及独立密钥环检查通过；Windows 44 项测试通过，2 项平台相关检查跳过，内置 FFmpeg 的窗口集成另行通过。Web CI 也完成上述 8 项后台批量场景。
+
+七个构建包保留在 `artifacts/ci-5e79c2d/`，附 `SHA256SUMS.txt` 与 `validation.json`。Windows 必需 DLL 和 ZIP 校验通过，三个 tar.gz 完整性通过；CI 的独立 Linux Web 服务包在不含 Flutter SDK 的 PATH 和其他工作目录下启动成功，页面/会话返回 200，并发设置在重启后保留。三个 Android APK 的签名、ZIP 16 KiB 对齐以及 26 个 64 位原生库的 ELF LOAD/RELRO 隔离检查通过，仍为开发签名。Android 模拟器初始化因可用磁盘不足停止，本轮新增的模拟器及镜像已清理；没有 Android 设备运行结果，不能用包检查代替真机验证。未合并 main 或发布 Release。
 
 ## 已提交基线 bcc38a3 的证据
 
