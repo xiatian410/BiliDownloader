@@ -69,19 +69,13 @@ jobs:
           flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/web_access_test.dart test/media_merge_test.dart test/remote_runner_test.dart test/attachments_test.dart test/subtitles_test.dart
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test integration_test/native_smoke_test.dart -d windows
-      - name: Build Linux, Android or Web
-        if: matrix.target != 'windows'
-        shell: bash
-        run: bash scripts/build_flutter.sh '${{ matrix.target }}'
-      - name: Build Windows
-        if: matrix.target == 'windows'
-        shell: pwsh
-        run: ./scripts/build_flutter.ps1
       - name: Compile Android device tests and test export recovery
         if: matrix.target == 'android'
-        working-directory: flutter_app/android
+        working-directory: flutter_app
         run: |
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 --no-daemon
+          flutter build apk --debug --target-platform android-x64
+          cd android
+          ./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 --no-daemon
           mkdir -p ../../artifacts/android-export-tests
           cp ../build/app/test-results/testDebugUnitTest/TEST-*.xml ../../artifacts/android-export-tests/
       - name: Test Android on a disposable 16 KiB emulator
@@ -99,6 +93,14 @@ jobs:
           path: artifacts/android*
           if-no-files-found: ignore
           retention-days: 7
+      - name: Build Linux, Android or Web
+        if: matrix.target != 'windows'
+        shell: bash
+        run: bash scripts/build_flutter.sh '${{ matrix.target }}'
+      - name: Build Windows
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: ./scripts/build_flutter.ps1
       - name: Test Web download and recovery in Chrome
         if: matrix.target == 'web'
         run: |

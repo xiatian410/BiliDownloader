@@ -19,9 +19,13 @@ public final class FixtureDocumentsProvider extends DocumentsProvider {
     private final CountDownLatch held = new CountDownLatch(1);
     @Override public boolean onCreate() { return true; }
     private File root() {
-        File root = new File(getContext().getFilesDir(), "documents");
-        if (!root.isDirectory() && !root.mkdirs()) throw new IllegalStateException("Fixture directory unavailable");
-        return root;
+        try {
+            // /data/data and /data/user/0 can name the same directory on Android.
+            // Both sides of ancestry checks must use the same canonical form.
+            File root = new File(getContext().getFilesDir(), "documents").getCanonicalFile();
+            if (!root.isDirectory() && !root.mkdirs()) throw new IllegalStateException("Fixture directory unavailable");
+            return root;
+        } catch (IOException error) { throw new IllegalStateException(error); }
     }
     private SharedPreferences preferences() { return getContext().getSharedPreferences("fixture", 0); }
     private File file(String id) {

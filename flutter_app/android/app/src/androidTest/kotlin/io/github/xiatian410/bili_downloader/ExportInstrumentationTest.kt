@@ -37,7 +37,9 @@ object DeviceExportFixture {
     const val authority = "io.github.xiatian410.bili_downloader.test.documents"
     val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
     val tree: Uri get() = DocumentsContract.buildTreeDocumentUri(authority, "root")
-    val bytes = ByteArray(131073) { (it % 251).toByte() }
+    // Exceed the pipe buffer even on large-page kernels, so the interrupted
+    // producer is still copying when the provider closes or the host stops it.
+    val bytes = ByteArray(2 * 1024 * 1024 + 1) { (it % 251).toByte() }
     val report = JSONObject()
     fun source(name: String) = File(context.filesDir, "device-export/$name").apply { parentFile!!.mkdirs() }
     private fun ensureGrant() {
