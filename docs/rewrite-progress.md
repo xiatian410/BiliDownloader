@@ -24,11 +24,11 @@
 - Web 未完成任务重启后保持原 ID、暂停后手动恢复测试通过。Android 导出提交顺序通过 MethodChannel 样本测试，不能代替真机文档提供方测试。
 - 服务端接口测试验证完整字节下载、跨会话文件拒绝、同源写入约束和 Cookie 不返回浏览器。
 - 本轮重新运行生产服务二进制，页面与会话接口返回 200；真实 B站请求仍返回 HTTP 412，未验证真实账号下载。
-- 功能提交 `9c13c23` 的 Windows、Linux、Android 三种 ABI、Web Release 编译全部通过。三个 APK 的签名与 16 KiB 对齐检查通过；Android 尚无真机结果，APK 仍使用开发签名。
-- 本轮 Web UI 与独立 Linux Web 服务重新构建成功，运行二进制后的页面及持久化会话接口检查通过。新试验包位于 `artifacts/BiliDownloader-web-service-linux-x64.tar.gz`。
+- 功能提交 `bcc38a3` 的 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40662260440) 全部成功。三个 Android ABI 的 APK 签名、ZIP 16 KiB 对齐检查通过，26 个 arm64/x86_64 原生库的 ELF LOAD 对齐和 RELRO 与后续可写区域隔离检查通过；检查依据见 [Android 官方说明](https://developer.android.com/guide/practices/page-sizes)。这些是静态检查，Android 尚无真机和 16 KiB 设备运行结果，APK 仍使用开发签名。
+- 从本轮 CI 下载的独立 Linux Web 服务包，在不含 Flutter SDK 的 PATH 和其他工作目录下启动成功，页面与新会话接口返回 200。Windows ZIP 与三个 tar.gz 结构/完整性检查通过。
 - Linux 原生集成测试通过：实际窗口加载，内置 FFmpeg 生成、合并并解码两条音视频轨道，以及取消单个 FFmpeg 会话而不影响并行会话。
-- 上一轮基线 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40654698750) 全部成功。Windows 新增检查发现并修复短路径与规范化路径比较导致成品取回 404，以及测试脚本无法直接启动 `dart` 的问题；修复后 26 项恢复/下载检查通过，1 项仅适用 Unix 符号链接的检查跳过，Windows 原生窗口与 FFmpeg 集成测试通过。
-- 上一轮构建包位于 `artifacts/ci-9c13c23/`，附 `SHA256SUMS.txt`。本轮增量将重新运行四平台 CI，其中 Web 增加 Chrome 完整样本流程，Windows 增加合并取消与远程任务恢复检查。未合并 main 或发布 Release。
+- 本轮 Windows 的 34 项恢复/下载/合并检查通过，2 项跳过：Unix 符号链接与外部系统 FFmpeg；Windows 内置 FFmpeg 的实际合并、单会话取消及并行会话继续由原生窗口集成测试覆盖并通过。Linux 的 72 项测试、原生窗口/FFmpeg 集成和密钥环检查也通过。
+- 七个构建包已下载到 `artifacts/ci-bcc38a3/`，附 `SHA256SUMS.txt` 与 `validation.json`。Web CI 保存 Chrome 流程结果、截图和测试成品。未合并 main 或发布 Release。
 
 ## 仍必须完成
 
@@ -37,6 +37,6 @@
 3. Web 服务认证部署方式、连接中断和过期会话交互，验证真实接口及账号权限。当前仍为本机服务，重启后需重新登录 B站。
 4. Android 后台下载/通知与真机存储体验，Windows DPI 实机验证。SAF 文档复制过程中被终止的恢复仍未完成：暂存原件保留，已有目标不会覆盖，但可能需人工核对导出文件。
 5. 自动封面、字幕、NFO、命名模板，以及合集/UP 主/收藏夹等计划能力分阶段实现并验证。
-6. Windows/Linux/Android 新版本构建、打包与 GitHub Actions 检查；Web 服务发布包与运行说明。
+6. 后续功能增量继续执行四平台构建、包验证和回归；正式 Android 签名与发布尚未配置。
 
 本阶段作为独立增量提交到 `flutter/migration`，通过 GitHub Actions 继续检查 Windows/Linux/Android/Web 构建，不合并到 main。远程结果以实际运行记录为准。目标保持进行中；以上通过的窄范围检查不能作为整个重构完成的证明。
