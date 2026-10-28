@@ -57,6 +57,79 @@ void main() {
   });
   tearDown(() => directory.delete(recursive: true));
 
+  test('Android export failures preserve the staged source and hide provider details', () async {
+    const channel = MethodChannel('bili_downloader/files');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final file = await File('${directory.path}/ready.mp4')
+        .writeAsBytes([1, 2, 3]);
+    final job = sampleJob(1)..outputs.add(file.path);
+    job.onCheckpoint = () async =>
+        fail('A failed export must not commit a URI');
+    for (final code in [
+      'exportConflict',
+      'exportPermissionLost',
+      'exportHistoryCorrupt',
+      'exportHistoryWriteFailed',
+      'exportVerificationFailed',
+      'unknownProviderError',
+    ]) {
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => throw PlatformException(
+          code: code,
+          message: 'content://private-provider/sensitive-document',
+        ),
+      );
+      await expectLater(
+        platform.exportCompletedFiles(job, 'content://fixture/tree'),
+        throwsA(
+          isA<AppFailure>()
+              .having(
+                (e) => e.key,
+                'key',
+                code == 'unknownProviderError' ? 'saveFailed' : code,
+              )
+              .having((e) => e.detail, 'detail', isEmpty),
+        ),
+      );
+      expect(job.outputs, [file.path]);
+      expect(await file.readAsBytes(), [1, 2, 3]);
+    }
+  });
+
+  test('a recovered Android receipt commits once after a failed task-history write', () async {
+    const channel = MethodChannel('bili_downloader/files');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var requests = 0;
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      requests++;
+      return 'content://fixture/same-document';
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final file = await File('${directory.path}/ready.mp4')
+        .writeAsBytes([1, 2, 3]);
+    final job = sampleJob(1)..outputs.add(file.path);
+    job.onCheckpoint = () async => throw const AppFailure('historyWriteFailed');
+    await expectLater(
+      platform.exportCompletedFiles(job, 'content://fixture/tree'),
+      throwsA(isA<AppFailure>()),
+    );
+    expect(job.outputs, [file.path]);
+    expect(await file.exists(), true);
+    Map<String, dynamic>? saved;
+    job.onCheckpoint = () async {
+      saved = jobSnapshot(job);
+    };
+    await platform.exportCompletedFiles(job, 'content://fixture/tree');
+    expect(requests, 2);
+    expect(restoreJob(saved!).outputs, ['content://fixture/same-document']);
+    expect(job.exportedFiles[file.path], 'content://fixture/same-document');
+    expect(await file.exists(), false);
+  });
+
   for (final failWrite in [false, true]) {
     test(
       'manual SAF export retains source until history commit (failure=$failWrite)',

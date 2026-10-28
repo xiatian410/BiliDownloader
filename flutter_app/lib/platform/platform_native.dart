@@ -67,12 +67,29 @@ Future<String> publishFile(
   bool retainSource = false,
 }) async {
   if (!destination.startsWith('content://')) return file;
-  final uri = await _channel.invokeMethod<String>('publishFile', {
-    'path': file,
-    'tree': destination,
-    'folder': folder,
-    'name': p.basename(file),
-  });
+  final String? uri;
+  try {
+    uri = await _channel.invokeMethod<String>('publishFile', {
+      'path': file,
+      'tree': destination,
+      'folder': folder,
+      'name': p.basename(file),
+    });
+  } on PlatformException catch (e) {
+    const known = {
+      'exportHistoryCorrupt',
+      'exportHistoryWriteFailed',
+      'exportConflict',
+      'exportSourceChanged',
+      'exportVerificationFailed',
+      'exportProviderUnavailable',
+      'exportPermissionLost',
+      'fileExists',
+      'outputMissing',
+      'saveFailed',
+    };
+    throw AppFailure(known.contains(e.code) ? e.code : 'saveFailed');
+  }
   if (uri == null) throw const AppFailure('saveFailed');
   // Delete the staged copy only after the system confirms the export succeeded.
   if (!retainSource) await File(file).delete();

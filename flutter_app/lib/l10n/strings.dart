@@ -8,6 +8,34 @@ class Strings {
   String call(String key) => _values[key]?[language == 'en' ? 1 : 0] ?? key;
 
   static const _values = <String, List<String>>{
+    'exportHistoryCorrupt': [
+      '导出记录无法校验，已保留文件，请检查记录或另选目录',
+      'Export history cannot be verified. Files are preserved; inspect the record or choose another folder.',
+    ],
+    'exportHistoryWriteFailed': [
+      '导出记录保存失败，暂存原件已保留',
+      'Could not save export history. The staged source is preserved.',
+    ],
+    'exportConflict': [
+      '目标与导出记录不符，已保留文件；请检查目标或另选目录',
+      'The destination does not match the export record. Files are preserved; inspect the destination or choose another folder.',
+    ],
+    'exportSourceChanged': [
+      '暂存文件在导出时发生变化，未确认完成',
+      'The staged source changed during export; completion was not confirmed.',
+    ],
+    'exportVerificationFailed': [
+      '导出后内容校验未通过，暂存原件已保留',
+      'Exported content failed verification. The staged source is preserved.',
+    ],
+    'exportProviderUnavailable': [
+      '系统文件服务暂不可读写，请检查目录后手动重试',
+      'The document provider is unavailable. Check the folder before retrying.',
+    ],
+    'exportPermissionLost': [
+      '系统目录授权已失效，请在设置中重新选择目录',
+      'Folder access was revoked. Select the system folder again in Settings.',
+    ],
     'subtitles': ['CC 字幕（SRT）', 'CC subtitles (SRT)'],
     'subtitlesOff': ['不下载字幕', 'Do not download subtitles'],
     'allSubtitleLanguages': ['全部可用语言', 'All available languages'],

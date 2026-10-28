@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Synthetic files only. This provider is in the test APK, never the app. -->
+        <provider
+            android:name="io.github.xiatian410.bili_downloader.FixtureDocumentsProvider"
+            android:authorities="io.github.xiatian410.bili_downloader.test.documents"
+            android:exported="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS"
+            android:grantUriPermissions="true">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+        <activity
+            android:name="io.github.xiatian410.bili_downloader.FixtureGrantActivity"
+            android:exported="true" />
+    </application>
+</manifest>

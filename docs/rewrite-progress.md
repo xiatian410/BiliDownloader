@@ -15,6 +15,20 @@
 - 合并阶段可暂停，显示媒体时间和输出大小；两分钟没有实质进度时停止合并，保留原始音视频。后端确认退出前不允许启动同一任务的新执行器。
 - Web 状态按版本处理，旧失败事件不覆盖新的继续结果；提交响应丢失后的重试返回原任务；首批媒体数据立即更新进度。错误提示补充可读的无障碍语义。
 
+## Android 系统目录导出恢复增量
+
+实际问题位于原生文件发布链路：创建 SAF 文档后直接复制，目标 URI 未在复制前持久化；进程被停止会留下部分文件，重试只能报告同名冲突。原先 Activity 各自持有执行器，也不能保证窗口替换期间只有一个写入者。这属于文件发布与生命周期问题，不是 B站接口、字段映射、页面渲染或缓存问题。
+
+现将写入移到应用级串行执行器，以 `AtomicFile` 保存带校验和的导出记录，在写媒体字节前确认目标 URI 已提交。手动继续时核对源文件摘要、目标名称及已写前缀；完整内容吻合时复用原 URI，部分内容吻合时重新写入并读回校验。已完成文件发生变化、未知同名文件或记录损坏时停止，保留文件。Dart 仍先保存任务历史，再删除暂存原件；历史提交失败后再试可以复用原生完成记录。没有增加自动重试、轮询或延时。
+
+主要文件：[恢复状态机](../flutter_app/android/app/src/main/kotlin/io/github/xiatian410/bili_downloader/RecoverableExport.kt)、[Android 存储适配器](../flutter_app/android/app/src/main/kotlin/io/github/xiatian410/bili_downloader/AndroidFileExports.kt)、`MainActivity.kt`、`platform_native.dart`、中英错误文案及 `persistence_test.dart`。
+
+本地 114 项 Flutter 测试、静态分析、格式与差异检查通过；14 项 JVM 测试通过，包含独立进程在复制中、完成记录前后被强制终止，以及外部改动、源文件变化、提供方不执行截断、错误文件名、Unicode 与记录损坏；设备测试 APK 编译通过。新增 [CI 设备测试脚本](../scripts/test_android_device.py) 仅在 GitHub Actions 临时模拟器运行，不在开发机安装系统镜像。测试使用单独测试 APK 中的合成文档提供方，通过正常 URI 授权及实际 Binder/文件描述符调用，检查中断恢复、目标保护、16 KiB 环境的内置 FFmpeg 和 200% 字体界面。设备运行结果待本次 CI 验证，编译成功不等于设备通过。
+
+仍有明确边界：若提供方已经创建文件，但进程在返回 URI 或保存 URI 前被停止，不能仅凭同名文件推断归属，仍要求用户检查目标或另选目录。读回校验不代表断电耐久性保证。导出记录保存在应用私有目录，仅含操作标识、文件名、URI、大小与摘要，不包含媒体正文或账号凭据。此增量不等于完成 Android 后台下载服务，也不能替代真机、第三方云盘提供方及实际系统目录选择器的验收。
+
+Android 行为依据：[DocumentsProvider 权限与目录协议](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/provider/DocumentsProvider.java)、[AtomicFile](https://developer.android.com/reference/android/util/AtomicFile)、[16 KiB 页大小测试](https://developer.android.com/guide/practices/page-sizes)。
+
 ## CC 字幕与语言选择增量
 
 此前任务只有弹幕 ASS，没有播放器 CC 字幕。现在“附加文件”提供字幕语言预览、单语言或全部语言选择，默认关闭，选项入队后冻结。预览标明首个已选分集；实际下载逐 CID 查询，校验返回分集身份，保留语言名称与自动生成标记。无字幕、所选语言缺失、空正文、需要登录和接口错误分别报告，字幕失败仍保留媒体成品。
@@ -103,7 +117,7 @@ CI 生成的独立 Linux Web 服务包在不含 Flutter SDK 的 PATH 和其他�
 1. 最终差异审查与剩余交互回归，继续覆盖不同浏览器和实际系统环境。
 2. 合并停止与恢复能力的设备验证；原生库若未确认停止，任务保持等待并提示重启，不冒险并发写入。当前进程中断测试不能作为突然断电或硬件故障保证。
 3. Web 认证配置在实际部署环境中的验证，以及真实接口和账号权限。当前已完成本地 HTTPS 代理与浏览器会话测试；服务重启后需重新登录 B站。
-4. Android 后台下载/通知与真机存储体验，Windows DPI 实机验证。SAF 文档复制过程中被终止的恢复仍未完成：暂存原件保留，已有目标不会覆盖，但可能需人工核对导出文件。
+4. Android 后台下载/通知与真机存储体验，Windows DPI 实机验证。SAF 导出恢复已加入持久记录与内容校验，仍需本轮设备验证；在创建目标但 URI 尚未提交的狭小窗口被终止时，仍需人工核对，不能冒险接管未知文件。
 5. 命名模板、完整媒体库组织，以及合集/UP 主/收藏夹等计划能力继续分阶段实现并验证；CC 字幕与语言选择、自动封面及基础 NFO 已落地，真实来源验证仍未完成。
 6. 后续功能增量继续执行四平台构建、包验证和回归；正式 Android 签名与发布尚未配置。
 

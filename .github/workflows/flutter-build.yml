@@ -77,6 +77,28 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: ./scripts/build_flutter.ps1
+      - name: Compile Android device tests and test export recovery
+        if: matrix.target == 'android'
+        working-directory: flutter_app/android
+        run: |
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 --no-daemon
+          mkdir -p ../../artifacts/android-export-tests
+          cp ../build/app/test-results/testDebugUnitTest/TEST-*.xml ../../artifacts/android-export-tests/
+      - name: Test Android on a disposable 16 KiB emulator
+        if: matrix.target == 'android'
+        run: |
+          test -c /dev/kvm
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'emulator' 'system-images;android-35;google_apis_ps16k;x86_64'
+          python3 scripts/test_android_device.py
+      - name: Preserve Android device failure evidence
+        if: failure() && matrix.target == 'android'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: BiliDownloader-android-failure
+          path: artifacts/android*
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test Web download and recovery in Chrome
         if: matrix.target == 'web'
         run: |
