@@ -45,6 +45,20 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   PageHeading(s('downloads'), s('tasksSubtitle')),
+                  if (c.queue.connectionError != null) ...[
+                    StatusBanner(s(c.queue.connectionError!.key), error: true),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonalIcon(
+                        onPressed: c.busy
+                            ? null
+                            : () => c.perform(c.queue.reconnect),
+                        icon: const Icon(Icons.sync),
+                        label: Text(s('reconnectService')),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     onChanged: (v) => setState(() => _search = v),
                     decoration: InputDecoration(
@@ -75,7 +89,8 @@ class _DownloadsPageState extends State<DownloadsPage> {
                     spacing: 8,
                     children: [
                       TextButton.icon(
-                        onPressed: visible.any((j) => j.canPause)
+                        onPressed:
+                            c.queue.connected && visible.any((j) => j.canPause)
                             ? () {
                                 for (final j in visible.where(
                                   (j) => j.canPause,
@@ -91,12 +106,13 @@ class _DownloadsPageState extends State<DownloadsPage> {
                       ),
                       TextButton.icon(
                         onPressed:
-                            visible.any(
-                              (j) => [
-                                JobState.paused,
-                                JobState.failed,
-                              ].contains(j.state),
-                            )
+                            c.queue.connected &&
+                                visible.any(
+                                  (j) => [
+                                    JobState.paused,
+                                    JobState.failed,
+                                  ].contains(j.state),
+                                )
                             ? () {
                                 for (final j in visible.where(
                                   (j) => [
@@ -240,13 +256,15 @@ class _DownloadsPageState extends State<DownloadsPage> {
             if (job.canPause)
               IconButton(
                 tooltip: s('pause'),
-                onPressed: () => c.queue.pause(job),
+                onPressed: c.queue.connected ? () => c.queue.pause(job) : null,
                 icon: const Icon(Icons.pause_rounded),
               ),
             if ([JobState.paused, JobState.failed].contains(job.state))
               IconButton(
                 tooltip: s('resume'),
-                onPressed: () => c.queue.resume(job),
+                onPressed: c.queue.connected && !job.controlPending
+                    ? () => c.queue.resume(job)
+                    : null,
                 icon: const Icon(Icons.play_arrow_rounded),
               ),
             if (!kIsWeb)

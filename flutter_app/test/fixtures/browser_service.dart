@@ -154,7 +154,7 @@ Future<void> main() async {
           'Fixture media: ${jsonEncode({'aid': aid, 'path': r.uri.path, 'start': start})}',
         );
       }
-      if (['4', '6'].contains(aid) &&
+      if (['4', '6', '101'].contains(aid) &&
           r.uri.path == '/video.mp4' &&
           start == 0 &&
           end > 0 &&

@@ -7,6 +7,7 @@ import 'models.dart';
 import 'media_merge.dart';
 
 enum JobState {
+  submitting,
   queued,
   running,
   pausing,
@@ -24,6 +25,7 @@ class DownloadJob {
   final String id;
   String? remoteId;
   String? submissionKey;
+  bool controlPending = false;
   final Episode episode;
   final DownloadOptions options;
   JobState state = JobState.queued;
@@ -49,9 +51,14 @@ class DownloadJob {
   }
 
   String? exportedDirectory;
-  bool get active =>
-      [JobState.running, JobState.pausing, JobState.merging].contains(state);
+  bool get active => [
+    JobState.submitting,
+    JobState.running,
+    JobState.pausing,
+    JobState.merging,
+  ].contains(state);
   bool get canPause =>
+      !controlPending &&
       [JobState.queued, JobState.running, JobState.merging].contains(state);
 }
 
@@ -81,8 +88,4 @@ class Publication {
 abstract class DownloadRunner {
   Future<void> run(DownloadJob job, void Function() changed);
   void dispose();
-}
-
-abstract interface class RemoteJobManagement {
-  Future<void> removeCompleted(Iterable<DownloadJob> jobs);
 }

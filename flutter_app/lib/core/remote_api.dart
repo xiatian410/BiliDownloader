@@ -13,6 +13,8 @@ class RemoteBiliApi extends BiliApi {
   @override
   bool get authenticated => _authenticated;
   List<dynamic> restoredJobs = [];
+  int serverConcurrency = 4;
+  int serverSettingsRevision = 0;
   bool recoveredHistory = false;
   Future<Map<String, dynamic>> call(
     String path, [
@@ -46,6 +48,8 @@ class RemoteBiliApi extends BiliApi {
     final data = await call('/api/session');
     _authenticated = data['authenticated'] == true;
     restoredJobs = data['jobs'] as List? ?? [];
+    serverConcurrency = data['concurrency'] as int? ?? 4;
+    serverSettingsRevision = data['settingsRevision'] as int? ?? 0;
     recoveredHistory = data['recovered'] == true;
   }
 

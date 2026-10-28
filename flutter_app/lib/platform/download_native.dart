@@ -5,9 +5,13 @@ import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 
 import '../core/bili_api.dart';
 import '../core/download_job.dart';
+import '../core/download_queue.dart';
 import '../core/io_download_runner.dart';
 import 'platform_native.dart' as platform;
 export '../core/io_download_runner.dart';
+
+DownloadQueue createDownloadQueue(BiliApi api) =>
+    DownloadQueue(createDownloadRunner(api));
 
 DownloadRunner createDownloadRunner(BiliApi api) => NativeDownloadRunner(
   api,

@@ -15,13 +15,19 @@ class ServiceFixtureApi extends BiliApi {
   final Future<void> Function(CancelToken?)? beforePlay;
   @override
   Future<VideoInfo> resolve(VideoId id, {CancelToken? cancel}) async =>
-      const VideoInfo(
+      VideoInfo(
         title: '测试下载',
         description: 'Fixture',
         cover: '',
-        id: 'AV1',
+        id: id.label,
         episodes: [
-          Episode(cid: 1, aid: 1, number: 1, name: 'Part 1', title: '测试下载'),
+          Episode(
+            cid: int.tryParse(id.value) ?? 1,
+            aid: int.tryParse(id.value) ?? 1,
+            number: 1,
+            name: 'Part 1',
+            title: '测试下载',
+          ),
         ],
       );
   @override
@@ -320,6 +326,150 @@ void main() {
       await socket.close();
     },
   );
+  test('batch validation is atomic and rejects unparsed members without adding a partial queue', () async {
+    final resolved = await post('/api/resolve', {'input': 'av1'});
+    final episode = videoFromJson(resolved.$2).episodes.single;
+    final options = optionsToJson(
+      const DownloadOptions(directory: '', quality: 80),
+    );
+    final response = await post('/api/jobs/batch', {
+      'jobs': [
+        {
+          'requestId': 'atomic-1',
+          'episode': episode.identity,
+          'options': options,
+        },
+        {'requestId': 'atomic-2', 'episode': 'unparsed', 'options': options},
+      ],
+    });
+    expect(response.$1, 422);
+    expect(response.$2['error'], 'noEpisodes');
+    expect((await post('/api/session', {})).$2['jobs'], isEmpty);
+  });
+
+  test('a failed history write leaves no partially accepted batch', () async {
+    final resolved = await post('/api/resolve', {'input': 'av1'});
+    final episode = videoFromJson(resolved.$2).episodes.single;
+    final stateFiles = await Directory('${temp.path}/downloads/.state')
+        .list()
+        .where((file) => file.path.endsWith('.json'))
+        .toList();
+    final base = stateFiles.single.path.replaceFirst(
+      RegExp(r'\.[01]\.json$'),
+      '',
+    );
+    final obstacles = [
+      Directory('$base.0.json.tmp'),
+      Directory('$base.1.json.tmp'),
+    ];
+    for (final directory in obstacles) {
+      await directory.create();
+    }
+    final response = await post('/api/jobs/batch', {
+      'jobs': [
+        for (var i = 0; i < 8; i++)
+          {
+            'requestId': 'failed-write-$i',
+            'episode': episode.identity,
+            'options': optionsToJson(
+              const DownloadOptions(directory: '', quality: 80),
+            ),
+          },
+      ],
+    });
+    expect(response.$1, 422);
+    expect(response.$2['error'], 'historyWriteFailed');
+    for (final directory in obstacles) {
+      await directory.delete();
+    }
+    expect((await post('/api/session', {})).$2['jobs'], isEmpty);
+    await service.close();
+    service = WebService(
+      webRoot: '${temp.path}/web',
+      downloadRoot: '${temp.path}/downloads',
+    );
+    await service.start(port: 0);
+    expect((await post('/api/session', {})).$2['jobs'], isEmpty);
+  });
+
+  test('all eight submitted jobs survive closing the observer and restarting the service', () async {
+    await service.close();
+    var started = 0;
+    final firstTwo = Completer<void>();
+    service = WebService(
+      webRoot: '${temp.path}/web',
+      downloadRoot: '${temp.path}/downloads',
+      apiFactory: () => ServiceFixtureApi(
+        'http://127.0.0.1:${media.port}/video',
+        beforePlay: (cancel) async {
+          started++;
+          if (started == 2) firstTwo.complete();
+          throw await cancel!.whenCancel;
+        },
+      ),
+    );
+    await service.start(port: 0);
+    expect((await post('/api/settings', {'concurrency': 2})).$1, 200);
+    expect((await post('/api/settings', {'concurrency': 5})).$1, 422);
+    final entries = <Map<String, dynamic>>[];
+    for (var i = 1; i <= 8; i++) {
+      final resolved = await post('/api/resolve', {'input': 'av$i'});
+      entries.add({
+        'requestId': 'batch-$i',
+        'episode': videoFromJson(resolved.$2).episodes.single.identity,
+        'options': optionsToJson(
+          const DownloadOptions(directory: '', quality: 80),
+        ),
+      });
+    }
+    final socket = await WebSocket.connect(
+      'ws://127.0.0.1:${service.port}/api/events',
+      headers: {'Cookie': cookie, 'Origin': service.origin},
+    );
+    final subscription = socket.listen((_) {});
+    final created = await post('/api/jobs/batch', {'jobs': entries});
+    expect(created.$1, 200);
+    final ids = (created.$2['jobs'] as List).map((j) => j['id']).toList();
+    expect(ids, hasLength(8));
+    await firstTwo.future.timeout(const Duration(seconds: 5));
+    await socket.close();
+    await subscription.cancel();
+    final state = (await post('/api/session', {})).$2;
+    expect(state['concurrency'], 2);
+    expect(
+      (state['jobs'] as List).where((j) => j['state'] == 'running'),
+      hasLength(2),
+    );
+    expect(
+      (state['jobs'] as List).where((j) => j['state'] == 'queued'),
+      hasLength(6),
+    );
+    final paused = await post('/api/jobs/control', {
+      'id': ids.last,
+      'action': 'pause',
+    });
+    expect(paused.$2['state'], 'paused');
+    expect(started, 2);
+    await service.close();
+    service = WebService(
+      webRoot: '${temp.path}/web',
+      downloadRoot: '${temp.path}/downloads',
+      apiFactory: () =>
+          ServiceFixtureApi('http://127.0.0.1:${media.port}/video'),
+    );
+    await service.start(port: 0);
+    final restored = (await post('/api/session', {})).$2;
+    expect(restored['concurrency'], 2);
+    expect((restored['jobs'] as List).map((j) => j['id']), ids);
+    expect(
+      (restored['jobs'] as List).every((j) => j['state'] == 'paused'),
+      true,
+    );
+    final retry = await post('/api/jobs/batch', {'jobs': entries});
+    expect((retry.$2['jobs'] as List).map((j) => j['id']), ids);
+    expect((await post('/api/session', {})).$2['jobs'], hasLength(8));
+  });
+
   test(
     'QR credentials remain server-side and session cookie is HttpOnly',
     () async {

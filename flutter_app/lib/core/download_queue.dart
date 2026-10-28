@@ -1,22 +1,26 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import 'download_job.dart';
 import 'models.dart';
 import 'job_snapshot.dart';
 import 'state_store.dart';
+import 'task_queue.dart';
 
-class DownloadQueue extends ChangeNotifier {
+class DownloadQueue extends TaskQueue {
   DownloadQueue(this.runner, {this.maxConcurrent = 4});
   final DownloadRunner runner;
+  @override
   final List<DownloadJob> jobs = [];
+  @override
   int maxConcurrent;
   bool _closed = false;
   StateStore? _store;
   bool _historyReady = false;
+  @override
   AppFailure? persistenceError;
+  @override
   bool recoveredHistory = false;
   final _running = <Future<void>>{};
   Future<void>? _closing;
@@ -31,6 +35,7 @@ class DownloadQueue extends ChangeNotifier {
     return next;
   }
 
+  @override
   Future<void> restore(StateStore store) async {
     if (_closed) {
       await store.close();
@@ -87,7 +92,8 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
-  void add(Iterable<DownloadJob> additions) {
+  @override
+  Future<void> add(Iterable<DownloadJob> additions) async {
     if (_closed) return;
     final added = additions.toList();
     for (final job in added) {
@@ -101,7 +107,8 @@ class DownloadQueue extends ChangeNotifier {
     _schedule();
   }
 
-  void setConcurrency(int value) {
+  @override
+  Future<void> setConcurrency(int value) async {
     if (value < 1 || value > 8) throw const AppFailure('invalidConcurrency');
     maxConcurrent = value;
     _schedule();
@@ -169,6 +176,7 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
+  @override
   void pause(DownloadJob job) {
     if (job.state == JobState.queued) {
       job.state = JobState.paused;
@@ -192,6 +200,7 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
+  @override
   void resume(DownloadJob job) {
     if (_closed) return;
     if (![JobState.paused, JobState.failed].contains(job.state)) return;
@@ -215,6 +224,7 @@ class DownloadQueue extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> clearCompleted({Iterable<DownloadJob>? only}) async {
     final ids = only?.map((j) => j.id).toSet();
     final targets = jobs
@@ -224,9 +234,6 @@ class DownloadQueue extends ChangeNotifier {
               (ids == null || ids.contains(j.id)),
         )
         .toList();
-    if (runner is RemoteJobManagement) {
-      await (runner as RemoteJobManagement).removeCompleted(targets);
-    }
     if (_store != null) {
       await _transaction(() async {
         final previous = List.of(jobs);
@@ -254,6 +261,7 @@ class DownloadQueue extends ChangeNotifier {
     super.dispose();
   }
 
+  @override
   Future<void> close() => _closing ??= _close();
   Future<void> _close() async {
     _closed = true;

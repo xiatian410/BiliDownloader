@@ -8,7 +8,7 @@ Flutter migration of the Python/PySide application. The original `src/` remains 
 - Batch input with per-source errors, episode search, selection and output previews.
 - BV/AV video and MD/EP series resolution, WBI-signed playback URLs, QR sign-in.
 - Maximum quality, preferred AVC/HEVC/AV1 codec, optional FLAC/Dolby and AI dubbed audio.
-- Concurrent download queue (1–8), pause/resume, bounded network retries and one expired-link refresh.
+- Concurrent download queue (native 1–8, Web service 1–4), pause/resume, bounded network retries and one expired-link refresh.
 - Checksummed task history and frozen task options; unfinished jobs restore paused and resume only on request.
 - HTTP Range and resource validation before appending partial downloads; existing output files are not overwritten.
 - FFmpeg stream-copy merge, audio-only/comment-only modes, separate audio retention and ASS comments.
@@ -63,6 +63,8 @@ Build artifacts go to the root `artifacts/` directory (ignored by Git). `.github
 ## Web download service
 
 `flutter build web` compiles the shared adaptive UI with a same-origin service adapter. The Dart service handles Bilibili sessions, parsing, media downloads and FFmpeg. Task updates use WebSocket events; completed files require the owning browser session.
+
+Web batches are persisted together before entering the service queue. Closing the browser leaves both running and queued tasks on the service. Each page uses one event connection for the full queue; a disconnect preserves the last known state and offers explicit reconnection. Queue concurrency is persisted on the service and synchronized between tabs. A service restart restores unfinished work paused, requiring manual continuation.
 
 After building, run `dart run bin/web_server.dart` from `flutter_app` and open `http://127.0.0.1:18743`. Install FFmpeg on the service host. A plain static file server is insufficient for login and downloads.
 

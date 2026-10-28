@@ -6,12 +6,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/bili_api.dart';
-import 'core/download_queue.dart';
+import 'core/task_queue.dart';
 import 'core/download_job.dart';
 import 'core/models.dart';
 import 'core/settings.dart';
-import 'core/remote_api.dart';
-import 'core/wire.dart';
 import 'core/state_store.dart';
 import 'platform/platform.dart' as platform;
 
@@ -79,7 +77,7 @@ class AppController extends ChangeNotifier {
     this.openHistory,
   });
   final BiliApi api;
-  final DownloadQueue queue;
+  final TaskQueue queue;
   final AppStore store;
   final Future<StateStore?> Function()? openHistory;
   static const storageTimeout = Duration(seconds: 5);
@@ -134,48 +132,18 @@ class AppController extends ChangeNotifier {
     }
     if (_disposed) return;
     try {
-      await api.initializeSession();
-      if (api is RemoteBiliApi) {
-        final remote = api as RemoteBiliApi;
-        if (remote.recoveredHistory) notice = 'historyRecovered';
-        queue.add(
-          remote.restoredJobs.map((raw) {
-            final data = Map<String, dynamic>.from(raw);
-            final job = DownloadJob(
-              episodeFromJson(Map<String, dynamic>.from(data['episode'])),
-              optionsFromJson(
-                Map<String, dynamic>.from(data['options']),
-                directory: '',
-              ),
-            );
-            job.remoteId = data['id'] as String;
-            job.received = data['received'] as int;
-            job.total = data['total'] as int;
-            job.actualQuality = data['actualQuality'] as int?;
-            job.detail = data['detail'] as String? ?? '';
-            if (data['error'] is Map) {
-              job.error = AppFailure(
-                data['error']['key'] as String,
-                data['error']['detail'] as String? ?? '',
-              );
-            }
-            if (['completed', 'paused', 'failed'].contains(data['state'])) {
-              job.state = JobState.values.byName(data['state'] as String);
-            }
-            job.outputs.addAll(
-              (data['outputs'] as List).map(
-                (f) => remote.origin.resolve(f['url'] as String).toString(),
-              ),
-            );
-            return job;
-          }),
-        );
+      if (queue.isRemote) {
+        await queue.reconnect();
+        settings.concurrency = queue.maxConcurrent;
+        if (queue.recoveredHistory) notice = 'historyRecovered';
+      } else {
+        await api.initializeSession();
       }
     } catch (e) {
       error = e is AppFailure ? e : const AppFailure('serviceUnavailable');
     }
     if (_disposed) return;
-    queue.setConcurrency(settings.concurrency);
+    if (!queue.isRemote) await queue.setConcurrency(settings.concurrency);
     initializing = false;
     _notify();
   }
@@ -348,31 +316,37 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  void enqueue() {
+  Future<void> enqueue() async {
     if ((!kIsWeb && settings.directory.isEmpty) || selected.isEmpty) {
       fail(const AppFailure('invalidDirectory'));
       return;
     }
-    final indices = selected.toList()..sort();
-    queue.add(indices.map((i) => DownloadJob(info!.episodes[i], options(i))));
-    tab = 1;
-    step = 0;
-    info = null;
-    sources.clear();
-    resolveErrors.clear();
-    media = null;
-    selected = {};
-    notice = null;
-    _notify();
+    await perform(() async {
+      final indices = selected.toList()..sort();
+      final jobs = indices
+          .map((i) => DownloadJob(info!.episodes[i], options(i)))
+          .toList();
+      await queue.add(jobs);
+      tab = 1;
+      step = 0;
+      info = null;
+      sources.clear();
+      resolveErrors.clear();
+      media = null;
+      selected = {};
+      notice = null;
+    });
   }
 
-  Future<void> saveSettings() async {
-    queue.setConcurrency(settings.concurrency);
+  Future<void> saveSettings({bool updateConcurrency = false}) async {
     _notify();
     try {
+      if (updateConcurrency) await queue.setConcurrency(settings.concurrency);
+      settings.concurrency = queue.maxConcurrent;
       await store.writeSettings(settings.toJson()).timeout(storageTimeout);
-    } catch (_) {
-      fail(const AppFailure('settingsError'));
+    } catch (e) {
+      settings.concurrency = queue.maxConcurrent;
+      fail(e is AppFailure ? e : const AppFailure('settingsError'));
     }
   }
 

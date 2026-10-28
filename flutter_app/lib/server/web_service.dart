@@ -30,6 +30,8 @@ class _Session {
   final sockets = <WebSocket>{};
   final qrKeys = <String>{};
   DateTime used = DateTime.now();
+  int concurrency = 4;
+  int settingsRevision = 0;
 }
 
 /// Same-origin local web host. Remote exposure requires a separate authenticated gateway.
@@ -85,6 +87,12 @@ class WebService {
           throw const AppFailure('historyCorrupt');
         }
         session.recovered = snapshot.recovered;
+        session.concurrency = snapshot.data['concurrency'] as int? ?? 4;
+        session.settingsRevision =
+            snapshot.data['settingsRevision'] as int? ?? 0;
+        if (session.concurrency < 1 || session.concurrency > 4) {
+          throw const AppFailure('historyCorrupt');
+        }
         session.used =
             DateTime.tryParse(snapshot.data['used'] as String? ?? '') ??
             DateTime.now();
@@ -138,12 +146,14 @@ class WebService {
 
   Future<void> _persist(_Session s) => _transaction(s, () => _writeSession(s));
 
-  Future<void> _writeSession(_Session s) async {
+  Future<void> _writeSession(_Session s, {Iterable<DownloadJob>? jobs}) async {
     try {
       await s.store.write({
         'version': 1,
         'used': s.used.toIso8601String(),
-        'jobs': s.jobs.values.map(jobSnapshot).toList(),
+        'concurrency': s.concurrency,
+        'settingsRevision': s.settingsRevision,
+        'jobs': (jobs ?? s.jobs.values).map(jobSnapshot).toList(),
       });
       s.storageError = null;
     } catch (e) {
@@ -168,7 +178,7 @@ class WebService {
     final bytes = <int>[];
     await for (final part in r.timeout(const Duration(seconds: 15))) {
       bytes.addAll(part);
-      if (bytes.length > 65536) throw const AppFailure('requestTooLarge');
+      if (bytes.length > 262144) throw const AppFailure('requestTooLarge');
     }
     final data = jsonDecode(utf8.decode(bytes));
     if (data is! Map) throw const AppFailure('invalidResponse');
@@ -188,6 +198,7 @@ class WebService {
 
   Map<String, dynamic> _job(DownloadJob j) => {
     'id': j.id,
+    'requestId': j.submissionKey,
     'revision': j.revision,
     'state': j.state.name,
     'stage': j.stage,
@@ -208,7 +219,11 @@ class WebService {
   };
   void _emit(_Session s, DownloadJob j) {
     j.revision++;
-    final data = jsonEncode(_job(j));
+    _broadcast(s, _job(j));
+  }
+
+  void _broadcast(_Session s, Map<String, dynamic> event) {
+    final data = jsonEncode(event);
     for (final socket in s.sockets.toList()) {
       if (socket.readyState == WebSocket.open) socket.add(data);
     }
@@ -220,6 +235,7 @@ class WebService {
       if (s.storageError != null) continue;
       for (final j in s.jobs.values) {
         if (_active >= 4) return;
+        if (s.jobs.values.where((j) => j.active).length >= s.concurrency) break;
         if (j.state != JobState.queued) continue;
         // Serialise identical destinations even across simultaneous submissions.
         if (s.jobs.values.any(
@@ -236,6 +252,73 @@ class WebService {
         unawaited(future.whenComplete(() => _running.remove(future)));
       }
     }
+  }
+
+  Future<List<DownloadJob>> _createJobs(
+    _Session s,
+    List<Map<String, dynamic>> entries, {
+    bool requireKeys = false,
+  }) async {
+    if (entries.isEmpty || entries.length > 200) {
+      throw const AppFailure('serviceBusy');
+    }
+    final result = <DownloadJob>[];
+    await _transaction(s, () async {
+      final additions = <DownloadJob>[];
+      final keys = <String>{};
+      for (final body in entries) {
+        final episode = s.episodes[body['episode']];
+        if (episode == null) throw const AppFailure('noEpisodes');
+        final requestId = body['requestId'];
+        if ((requestId == null && requireKeys) ||
+            (requestId != null &&
+                (requestId is! String ||
+                    !RegExp(r'^[a-zA-Z0-9_-]{1,96}$').hasMatch(requestId) ||
+                    !keys.add(requestId)))) {
+          throw const AppFailure('invalidResponse');
+        }
+        final options = optionsFromJson(
+          Map<String, dynamic>.from(body['options']),
+          directory: p.join(downloadRoot, s.id),
+        );
+        DownloadJob? previous;
+        if (requestId != null) {
+          for (final job in s.jobs.values) {
+            if (job.submissionKey == requestId) {
+              previous = job;
+              break;
+            }
+          }
+        }
+        if (previous != null) {
+          if (previous.episode.identity != episode.identity ||
+              jsonEncode(optionsToJson(previous.options)) !=
+                  jsonEncode(optionsToJson(options))) {
+            throw const AppFailure('invalidResponse');
+          }
+          result.add(previous);
+        } else {
+          final job = DownloadJob(episode, options)
+            ..submissionKey = requestId as String?;
+          job.onCheckpoint = () => _persist(s);
+          additions.add(job);
+          result.add(job);
+        }
+      }
+      if (s.jobs.length + additions.length > 200) {
+        throw const AppFailure('serviceBusy');
+      }
+      // Publish only after the entire batch is durable. An unrelated task can
+      // finish (and call _schedule) while this write is awaiting the filesystem.
+      await _writeSession(s, jobs: [...s.jobs.values, ...additions]);
+      for (final job in additions) {
+        s.jobs[job.id] = job;
+      }
+    });
+    for (final job in result) {
+      _emit(s, job);
+    }
+    return result;
   }
 
   Future<void> _run(_Session s, DownloadJob j) async {
@@ -354,6 +437,8 @@ class WebService {
           'authenticated': s.api.cookies.isNotEmpty,
           'jobs': s.jobs.values.map(_job).toList(),
           'recovered': s.recovered,
+          'concurrency': s.concurrency,
+          'settingsRevision': s.settingsRevision,
         });
         return;
       }
@@ -375,9 +460,14 @@ class WebService {
           onDone: () => s.sockets.remove(socket),
           onError: (_) => s.sockets.remove(socket),
         );
-        for (final j in s.jobs.values) {
-          socket.add(jsonEncode(_job(j)));
-        }
+        socket.add(
+          jsonEncode({
+            'type': 'snapshot',
+            'jobs': s.jobs.values.map(_job).toList(),
+            'concurrency': s.concurrency,
+            'settingsRevision': s.settingsRevision,
+          }),
+        );
         return;
       }
       if (route.startsWith('/api/cover/') && r.method == 'GET') {
@@ -506,50 +596,52 @@ class WebService {
           await s.api.logout();
           _json(r, {'ok': true});
         case '/api/jobs':
-          final episode = s.episodes[body['episode']];
-          if (episode == null) throw const AppFailure('noEpisodes');
-          final requestId = body['requestId'] as String?;
-          if (requestId != null &&
-              !RegExp(r'^[a-zA-Z0-9_-]{1,96}$').hasMatch(requestId)) {
-            throw const AppFailure('invalidResponse');
-          }
-          final options = optionsFromJson(
-            Map<String, dynamic>.from(body['options']),
-            directory: p.join(downloadRoot, s.id),
+          final jobs = await _createJobs(s, [body]);
+          _json(r, _job(jobs.single));
+          _schedule();
+        case '/api/jobs/batch':
+          final raw = body['jobs'];
+          if (raw is! List) throw const AppFailure('invalidResponse');
+          final jobs = await _createJobs(
+            s,
+            raw.map((j) => Map<String, dynamic>.from(j)).toList(),
+            requireKeys: true,
           );
-          var j = DownloadJob(episode, options)..submissionKey = requestId;
-          j.onCheckpoint = () => _persist(s);
+          _json(r, {'jobs': jobs.map(_job).toList()});
+          _schedule();
+        case '/api/settings':
+          final value = body['concurrency'];
+          if (value is! int || value < 1 || value > 4) {
+            throw const AppFailure('invalidConcurrency');
+          }
           await _transaction(s, () async {
-            if (requestId != null) {
-              for (final previous in s.jobs.values) {
-                if (previous.submissionKey != requestId) continue;
-                if (previous.episode.identity != episode.identity ||
-                    jsonEncode(optionsToJson(previous.options)) !=
-                        jsonEncode(optionsToJson(options))) {
-                  throw const AppFailure('invalidResponse');
-                }
-                j = previous;
-                return;
-              }
-            }
-            if (s.jobs.length >= 200) throw const AppFailure('serviceBusy');
-            s.jobs[j.id] = j;
+            final previous = s.concurrency;
+            final previousRevision = s.settingsRevision;
+            s.concurrency = value;
+            s.settingsRevision++;
             try {
               await _writeSession(s);
             } catch (_) {
-              s.jobs.remove(j.id);
+              s.concurrency = previous;
+              s.settingsRevision = previousRevision;
               rethrow;
             }
           });
-          _json(r, _job(j));
+          final data = {
+            'type': 'settings',
+            'concurrency': s.concurrency,
+            'revision': s.settingsRevision,
+          };
+          _broadcast(s, data);
+          _json(r, data);
           _schedule();
         case '/api/jobs/remove':
           final ids = body['ids'];
           if (ids is! List || ids.length > 200) {
             throw const AppFailure('invalidResponse');
           }
+          final removed = <String, DownloadJob>{};
           await _transaction(s, () async {
-            final removed = <String, DownloadJob>{};
             for (final id in ids) {
               final job = s.jobs[id];
               if (job?.state == JobState.completed) {
@@ -564,6 +656,7 @@ class WebService {
               rethrow;
             }
           });
+          _broadcast(s, {'type': 'removed', 'ids': removed.keys.toList()});
           _json(r, {'ok': true});
         case '/api/jobs/control':
           final j = s.jobs[body['id']];

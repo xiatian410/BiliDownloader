@@ -49,15 +49,21 @@ const { EventEmitter } = require('node:events');
     context.setDefaultTimeout(15000);
     context.setDefaultNavigationTimeout(30000);
     const jobs = new Map(), jobEvents = new EventEmitter();
+    const blockedJobAids = new Set();
     let activeSocket;
     await context.routeWebSocket('**/api/events', socket => {
       activeSocket = socket;
       const server = socket.connectToServer();
       server.onMessage(message => {
-        const job = JSON.parse(message.toString());
-        jobHistory.push({ at: Date.now(), id: job.id, aid: job.episode?.aid, state: job.state, stage: job.stage, received: job.received, total: job.total });
-        jobs.set(job.id, job);
-        jobEvents.emit('job', job);
+        const data = JSON.parse(message.toString());
+        if (!data.type && blockedJobAids.has(data.episode?.aid)) return;
+        if (data.type === 'snapshot') jobs.clear();
+        if (data.type === 'removed') for (const id of data.ids) jobs.delete(id);
+        for (const job of data.type === 'snapshot' ? data.jobs : data.type ? [] : [data]) {
+          jobHistory.push({ at: Date.now(), id: job.id, aid: job.episode?.aid, state: job.state, stage: job.stage, received: job.received, total: job.total });
+          jobs.set(job.id, job);
+          jobEvents.emit('job', job);
+        }
         socket.send(message);
       });
     });
@@ -105,9 +111,12 @@ const { EventEmitter } = require('node:events');
       }
       let submitted;
       if (dropResponse) {
+        // Suppress the independent acknowledgement as well as the HTTP reply.
+        // Otherwise the shared event connection correctly confirms acceptance.
+        blockedJobAids.add(aid);
         let accepted, failed;
         submitted = observe(new Promise((resolve, reject) => { accepted = resolve; failed = reject; }));
-        await page.route('**/api/jobs', async route => {
+        await page.route('**/api/jobs/batch', async route => {
           try {
             const response = await route.fetch({ timeout: 15000 });
             accepted(await response.json());
@@ -118,10 +127,10 @@ const { EventEmitter } = require('node:events');
           }
         }, { times: 1 });
       } else {
-        submitted = observe(page.waitForResponse(r => r.url().endsWith('/api/jobs') && r.request().method() === 'POST').then(r => r.json()));
+        submitted = observe(page.waitForResponse(r => r.url().endsWith('/api/jobs/batch') && r.request().method() === 'POST').then(r => r.json()));
       }
       await page.getByRole('button', { name: '加入下载队列 (1)', exact: true }).click();
-      const job = await submitted;
+      const job = (await submitted).jobs[0];
       assert.ok(job.id, JSON.stringify(job));
       await page.getByRole('checkbox', { name: '全部', exact: true }).waitFor();
       await typeInto(page.getByRole('textbox'), `AV${aid}`);
@@ -235,19 +244,20 @@ const { EventEmitter } = require('node:events');
       const disconnectedId = await createJob(6);
       await waitForJob(disconnectedId, j => j.stage === 'videoDownload' && j.received > 0 && j.received < j.total);
       await activeSocket.close({ code: 1011, reason: 'fixture disconnect' });
-      await page.getByRole('button', { name: '继续', exact: true }).waitFor();
-      assert.match(await page.locator('body').ariaSnapshot(), /与服务连接中断；任务可能仍在执行，可点击继续重新连接。/);
+      await page.getByRole('button', { name: '重新连接', exact: true }).waitFor();
+      assert.match(await page.locator('body').ariaSnapshot(), /与服务连接中断，后台状态暂时未知；重新连接后同步任务。/);
       await releaseMedia();
-      await page.getByRole('button', { name: '继续', exact: true }).click();
+      await page.getByRole('button', { name: '重新连接', exact: true }).click();
       await waitForJob(disconnectedId, j => j.state === 'completed');
       await saveOutput('reconnected.mp4');
       console.log('Browser: WebSocket reconnect verified.');
     }
     const lostResponseId = await createJob(7, '视频', true);
     await page.getByRole('button', { name: '继续', exact: true }).waitFor();
-    const resubmitted = observe(page.waitForResponse(r => r.url().endsWith('/api/jobs') && r.request().method() === 'POST'));
+    const resubmitted = observe(page.waitForResponse(r => r.url().endsWith('/api/jobs/batch') && r.request().method() === 'POST'));
+    blockedJobAids.delete(7);
     await page.getByRole('button', { name: '继续', exact: true }).click();
-    assert.equal((await (await resubmitted).json()).id, lostResponseId);
+    assert.equal((await (await resubmitted).json()).jobs[0].id, lostResponseId);
     await waitForJob(lostResponseId, j => j.state === 'completed');
     await saveOutput('lost-response-recovered.mp4');
     const origin = new URL(page.url()).origin;
@@ -271,12 +281,87 @@ const { EventEmitter } = require('node:events');
     // Wait bounded animation frames for Material's theme transition to settle.
     await page.evaluate(async () => { for (let i = 0; i < 20; i++) await new Promise(requestAnimationFrame); });
     await page.screenshot({ path: path.join(output, 'mobile-dark.png') });
+    let queuedBatchSurvivedBrowserRestart = false;
+    if (fixture) {
+      const settings = await context.request.post(`${origin}/api/settings`, {
+        headers: { Origin: origin, 'X-Bili-Client': '1' }, data: { concurrency: 1 },
+      });
+      assert.equal(settings.status(), 200);
+      await page.setViewportSize({ width: 1440, height: 1080 });
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.getByRole('button', { name: '新建下载', exact: true }).click();
+      await typeInto(page.getByRole('textbox', { name: /已识别:|粘贴一个或多个/ }),
+        Array.from({ length: 8 }, (_, i) => `av${101 + i}`).join(';'));
+      await page.getByRole('button', { name: '解析链接', exact: true }).click();
+      await page.getByRole('checkbox', { name: /跨端下载验证 · AV108/ }).waitFor();
+      await page.getByRole('checkbox', { name: '视频', exact: true }).click();
+      await page.getByRole('button', { name: '获取可用画质', exact: true }).click();
+      const submitted = observe(page.waitForResponse(r => r.url().endsWith('/api/jobs/batch') && r.request().method() === 'POST'));
+      await page.getByRole('button', { name: '加入下载队列 (8)', exact: true }).click();
+      const batch = (await (await submitted).json()).jobs;
+      assert.equal(batch.length, 8);
+      const ids = batch.map(j => j.id);
+      await waitForJob(ids[0], j => j.state === 'running' && j.received > 0 && j.received < j.total);
+      const before = await context.request.post(`${origin}/api/session`, {
+        headers: { Origin: origin, 'X-Bili-Client': '1' }, data: {},
+      });
+      const pending = (await before.json()).jobs.filter(j => ids.includes(j.id));
+      assert.equal(pending.filter(j => j.state === 'queued').length, 7);
+      assert.equal(pending.filter(j => j.state === 'running').length, 1);
+      // Ownership cookies stay in memory, never in logs or an artifact.
+      const savedState = await context.storageState();
+      await browser.close();
+      await releaseMedia();
+      browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome',
+        headless: true, args: process.getuid?.() === 0 ? ['--no-sandbox'] : [] });
+      const recoveredContext = await browser.newContext({ storageState: savedState,
+        viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
+      recoveredContext.setDefaultTimeout(15000);
+      page = await recoveredContext.newPage();
+      page.on('pageerror', e => errors.push(e.message));
+      // A static document with a read-only observer, no Flutter queue or task controls.
+      await page.goto(`${origin}/manifest.json`);
+      const completed = await page.evaluate(ids => new Promise((resolve, reject) => {
+        const tasks = new Map();
+        const socket = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/api/events`);
+        const timer = setTimeout(() => finish(new Error('Background batch did not complete')), 15000);
+        function finish(error) {
+          clearTimeout(timer);
+          socket.onclose = null;
+          socket.onerror = null;
+          socket.close();
+          error ? reject(error) : resolve([...tasks.values()]);
+        }
+        socket.onerror = () => finish(new Error('Background observer failed'));
+        socket.onclose = () => finish(new Error('Background observer closed'));
+        socket.onmessage = event => {
+          const data = JSON.parse(event.data);
+          for (const task of data.type === 'snapshot' ? data.jobs : data.type ? [] : [data]) {
+            if (ids.includes(task.id)) tasks.set(task.id, task);
+          }
+          if ([...tasks.values()].some(t => t.state === 'failed')) finish(new Error('Background job failed'));
+          else if (tasks.size === ids.length && [...tasks.values()].every(t => t.state === 'completed')) finish();
+        };
+      }), ids);
+      assert.equal(completed.length, 8);
+      assert.ok(completed.every(j => j.outputs.length === 1));
+      await page.goto(origin, { waitUntil: 'networkidle' });
+      await semantics();
+      await page.getByRole('button', { name: '下载任务', exact: true }).click();
+      await typeInto(page.getByRole('textbox'), 'AV108');
+      const backgroundFile = await saveOutput('background-batch-last.mp4');
+      execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-i', backgroundFile,
+        '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-']);
+      queuedBatchSurvivedBrowserRestart = true;
+      console.log('Browser: all eight tasks completed after the browser process closed; seven were still queued.');
+    }
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(output, 'browser-result.json'), JSON.stringify({ fixture: true, errors,
       downloadedFile: path.basename(file), streams: probe.streams.map(s => s.codec_type), reloadPreservedTask: true,
       serviceRestartPreservedTask: !!fixture, qrLogin: true, audioOnly: true, commentsOnly: true,
       failedTaskResumed: true, partialByteResume: !!fixture, disconnectedTaskReconnected: !!fixture,
       lostCreateResponseRecovered: true,
+      queuedBatchSurvivedBrowserRestart, backgroundBatchCount: fixture ? 8 : 0,
       mediaRequests }, null, 2));
     for (const name of ['failure.png', 'failure-aria.txt', 'failure-network.json', 'failure-inputs.json']) fs.rmSync(path.join(output, name), { force: true });
     console.log(`Browser fixture passed: batch partial failure, download, FFmpeg merge, file export, refresh recovery, QR login, audio/comments, failure recovery, mobile rendering${fixture ? ', service restart, partial byte resume, WebSocket reconnect' : ''}.`);

@@ -63,6 +63,8 @@ class Strings {
     'emptyQueue': ['暂无下载任务', 'No downloads yet'],
     'emptyHint': ['从“输入”页面添加视频', 'Add a video from the Input tab'],
     'queued': ['等待下载', 'Queued'],
+    'submitting': ['正在提交任务', 'Submitting tasks'],
+    'reconnectService': ['重新连接', 'Reconnect'],
     'running': ['下载中', 'Downloading'],
     'pausing': ['正在暂停', 'Pausing'],
     'paused': ['已暂停', 'Paused'],
@@ -194,8 +196,8 @@ class Strings {
       'Download service unavailable. Open this page through the companion web server.',
     ],
     'serviceDisconnected': [
-      '与服务连接中断；任务可能仍在执行，可点击继续重新连接。',
-      'Connection lost. The task may still be running; resume to reconnect.',
+      '与服务连接中断，后台状态暂时未知；重新连接后同步任务。',
+      'Connection lost. Background status is unknown; reconnect to synchronize tasks.',
     ],
     'serviceSessionExpired': [
       '服务会话已失效，请刷新页面重新连接。',

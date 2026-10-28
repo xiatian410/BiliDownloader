@@ -41,7 +41,7 @@ class SettingsPage extends StatelessWidget {
             .toList(),
         onChanged: (v) {
           change(v as T);
-          c.saveSettings();
+          c.saveSettings(updateConcurrency: key == 'concurrency');
         },
       ),
     );
@@ -124,9 +124,14 @@ class SettingsPage extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 20),
-              select('concurrency', c.settings.concurrency, {
-                for (var i = 1; i <= 8; i++) i: '$i',
-              }, (v) => c.settings.concurrency = v),
+              ListenableBuilder(
+                listenable: c.queue,
+                builder: (context, _) =>
+                    select('concurrency', c.queue.maxConcurrent, {
+                      for (var i = 1; i <= c.queue.maxSupportedConcurrent; i++)
+                        i: '$i',
+                    }, (v) => c.settings.concurrency = v),
+              ),
               select('codec', c.settings.codec, {
                 7: 'H.264 / AVC',
                 12: 'H.265 / HEVC',
