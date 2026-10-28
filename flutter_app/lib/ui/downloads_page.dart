@@ -45,6 +45,19 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   PageHeading(s('downloads'), s('tasksSubtitle')),
+                  if (platform.isAndroid) ...[
+                    Text(s('backgroundHint')),
+                    TextButton.icon(
+                      onPressed: c.busy
+                          ? null
+                          : () => c.perform(
+                              platform.configureDownloadNotifications,
+                            ),
+                      icon: const Icon(Icons.notifications_outlined),
+                      label: Text(s('downloadNotifications')),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   if (c.queue.connectionError != null) ...[
                     StatusBanner(s(c.queue.connectionError!.key), error: true),
                     Align(

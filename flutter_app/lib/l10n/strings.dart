@@ -8,6 +8,25 @@ class Strings {
   String call(String key) => _values[key]?[language == 'en' ? 1 : 0] ?? key;
 
   static const _values = <String, List<String>>{
+    'backgroundWorking': ['正在下载或处理文件', 'Downloading or processing files'],
+    'pauseAllDownloads': ['暂停全部', 'Pause all'],
+    'backgroundHint': [
+      '离开页面后继续处理任务。允许通知可查看进度或暂停；系统停止应用后需手动恢复。',
+      'Tasks continue after leaving the screen. Allow notifications for progress and pause controls. Resume manually after the system stops the app.',
+    ],
+    'downloadNotifications': ['下载通知设置', 'Download notification settings'],
+    'backgroundUnavailable': [
+      '系统未允许继续后台任务，进度已保留，请打开应用后手动恢复',
+      'The system did not allow background work. Progress is preserved; open the app and resume manually.',
+    ],
+    'backgroundExpired': [
+      '已达到系统后台运行时限，进度已保留，请打开应用后手动恢复',
+      'The system background time limit was reached. Progress is preserved; open the app and resume manually.',
+    ],
+    'notificationsUnavailable': [
+      '无法打开通知设置，请在系统设置中操作',
+      'Could not open notification settings. Use system settings.',
+    ],
     'exportHistoryCorrupt': [
       '导出记录无法校验，已保留文件，请检查记录或另选目录',
       'Export history cannot be verified. Files are preserved; inspect the record or choose another folder.',

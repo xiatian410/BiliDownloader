@@ -2,18 +2,30 @@ package io.github.xiatian410.bili_downloader
 
 import android.app.Activity
 import android.content.Intent
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import android.net.Uri
 import android.provider.DocumentsContract
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodCall
 
 class MainActivity : FlutterActivity() {
     private var picker: MethodChannel.Result? = null
+    private var notifications: MethodChannel.Result? = null
+
+    override fun provideFlutterEngine(context: Context): FlutterEngine = DownloadRuntime.engine(context)
+    override fun shouldDestroyEngineWithHost() = false
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
-        MethodChannel(engine.dartExecutor.binaryMessenger, "bili_downloader/files").setMethodCallHandler { call, result ->
+        DownloadRuntime.attach(this)
+    }
+
+    fun fileAction(call: MethodCall, result: MethodChannel.Result) {
             when (call.method) {
                 "pickDirectory" -> {
                     if (picker != null) result.error("busy", "A folder picker is already open", null)
@@ -26,7 +38,6 @@ class MainActivity : FlutterActivity() {
                         startActivityForResult(intent, 410)
                     }
                 }
-                "publishFile" -> AndroidFileExports.publish(applicationContext, call, result)
                 "openDirectory" -> {
                     try {
                         val path = requireNotNull(call.argument<String>("path"))
@@ -42,7 +53,29 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+    }
+
+    fun requestDownloadNotifications(result: MethodChannel.Result) {
+        val preferences = getSharedPreferences("notifications", MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            (!preferences.getBoolean("requested", false) || shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))) {
+            if (notifications != null) { result.error("busy", "Permission request is open", null); return }
+            notifications = result
+            preferences.edit().putBoolean("requested", true).apply()
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 411)
+        } else {
+            try {
+                val intent = if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                startActivity(intent)
+                result.success(null)
+            } catch (_: RuntimeException) { result.error("notificationsUnavailable", "Cannot open settings", null) }
         }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 411) { notifications?.success(null); notifications = null }
     }
 
     @Deprecated("Activity result API used by FlutterActivity")
@@ -60,6 +93,9 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        DownloadRuntime.detach(this)
+        notifications?.error("closed", "Activity closed", null)
+        notifications = null
         picker?.error("closed", "Activity closed", null)
         picker = null
         super.onDestroy()

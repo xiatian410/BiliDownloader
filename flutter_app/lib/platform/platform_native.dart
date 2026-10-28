@@ -18,6 +18,15 @@ Future<StateStore?> openHistoryStore() async => FileStateStore(
 const _channel = MethodChannel('bili_downloader/files');
 bool get isAndroid => Platform.isAndroid;
 bool get isLinux => Platform.isLinux;
+Future<void> configureDownloadNotifications() async {
+  try {
+    await const MethodChannel('bili_downloader/execution')
+        .invokeMethod<void>('notifications');
+  } catch (_) {
+    throw const AppFailure('notificationsUnavailable');
+  }
+}
+
 const _credentials = MethodChannel('bili_downloader/credentials');
 Future<String?> readLinuxCredentials() =>
     _credentials.invokeMethod<String>('read');

@@ -8,6 +8,7 @@ Future<StateStore?> openHistoryStore() async => null;
 
 bool get isAndroid => false;
 bool get isLinux => false;
+Future<void> configureDownloadNotifications() async {}
 Future<String?> readLinuxCredentials() async => null;
 Future<void> writeLinuxCredentials(String? value) async {}
 Future<String> defaultDirectory() async => '';

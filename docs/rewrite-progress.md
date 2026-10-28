@@ -17,6 +17,20 @@
 - 合并阶段可暂停，显示媒体时间和输出大小；两分钟没有实质进度时停止合并，保留原始音视频。后端确认退出前不允许启动同一任务的新执行器。
 - Web 状态按版本处理，旧失败事件不覆盖新的继续结果；提交响应丢失后的重试返回原任务；首批媒体数据立即更新进度。错误提示补充可读的无障碍语义。
 
+## Android 后台队列与通知增量（设备检查进行中）
+
+确认问题来源为宿主生命周期：原先 `FlutterActivity` 关闭时销毁 Flutter 引擎，Dart 下载队列随之丢失；单独延长文件导出执行器的生命周期不足以保住 HTTP、合并与队列状态。没有发现需要更改 B站返回字段或清理缓存的依据。
+
+现在由应用进程保留一个 Flutter 引擎，页面重新附着到同一队列。原生文件通道仅通过弱引用访问当前 Activity，文件发布继续使用应用 Context。运行任务启动 Android 前台服务并等待确认；连续排队任务共享服务，最后一个任务和历史写入结束后才释放。服务被拒绝、系统超时或异常停止会取消现有任务并保留进度，不自动复活或重试。运行服务声明 `dataSync`，Android 15 及以上同时声明媒体处理类型；按系统运行配额处理超时。
+
+通知提供打开应用和暂停全部入口，内容只显示任务数量/阶段进度，不含视频标题或账号信息。下载页新增中英说明和主动授权入口；拒绝通知不禁止前台服务运行。通知写入由现有进度事件触发，最多每秒一次；没有新增周期轮询。服务启动确认设置单次 8 秒上限；系统超时回调立即停止服务并请求队列暂停。强制停止进程后仍按原持久化逻辑手动恢复。
+
+主要文件：`DownloadRuntime.kt`、`DownloadService.kt`、`MainActivity.kt`、`AndroidManifest.xml`、`execution_host.dart`、`android_execution_host.dart`、`download_queue.dart`、下载页与中英文案。只在 CI 调试构建中使用 `integration_test/android_device_app.dart`，提供本机 HTTP 样本和控制通道；发布构建继续使用 `lib/main.dart`。
+
+本地静态分析、121 项 Flutter 测试、14 项 JVM 测试、Android 调试 APK 及设备测试 APK 编译通过，Python 语法和差异检查通过。新队列测试覆盖服务启动前取消、拒绝启动、串行及并发任务共享服务、通知暂停、超时、历史提交阻塞与磁盘写入失败后的服务释放。新增设备用例将验证关闭 Activity 后真实 HTTP 下载与摘要/解码、重新附着到同一引擎、通知权限拒绝、通知暂停与 Range 恢复，以及实际超时回调；在远程模拟器完成前不视为已通过。测试不在本机安装模拟器镜像。
+
+依据：[Flutter 共享引擎](https://docs.flutter.dev/add-to-app/android/add-flutter-screen)、[前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types)、[系统超时](https://developer.android.com/develop/background-work/services/fgs/timeout)、[通知授权](https://developer.android.com/develop/ui/compose/notifications/notification-permission)。物理设备锁屏、厂商省电策略和长时间后台运行仍需实机验收。
+
 ## Android 系统目录导出恢复增量
 
 实际问题位于原生文件发布链路：创建 SAF 文档后直接复制，目标 URI 未在复制前持久化；进程被停止会留下部分文件，重试只能报告同名冲突。原先 Activity 各自持有执行器，也不能保证窗口替换期间只有一个写入者。这属于文件发布与生命周期问题，不是 B站接口、字段映射、页面渲染或缓存问题。

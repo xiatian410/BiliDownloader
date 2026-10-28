@@ -15,6 +15,7 @@ abstract class TaskQueue extends ChangeNotifier {
   AppFailure? get connectionError => null;
   AppFailure? get persistenceError => null;
   bool get recoveredHistory => false;
+  void setLanguage(String language) {}
   Future<void> restore(StateStore store) =>
       Future.error(UnsupportedError('This queue has no local history store'));
   Future<void> reconnect({bool force = false}) async {}

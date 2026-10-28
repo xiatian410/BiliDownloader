@@ -73,9 +73,9 @@ jobs:
         if: matrix.target == 'android'
         working-directory: flutter_app
         run: |
-          flutter build apk --debug --target-platform android-x64
+          flutter build apk --debug --target-platform android-x64 --target integration_test/android_device_app.dart
           cd android
-          ./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 --no-daemon
+          ./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 -Ptarget=integration_test/android_device_app.dart --no-daemon
           mkdir -p ../../artifacts/android-export-tests
           cp ../build/app/test-results/testDebugUnitTest/TEST-*.xml ../../artifacts/android-export-tests/
       - name: Test Android on a disposable 16 KiB emulator

@@ -7,10 +7,40 @@ import 'models.dart';
 import 'job_snapshot.dart';
 import 'state_store.dart';
 import 'task_queue.dart';
+import 'execution_host.dart';
 
 class DownloadQueue extends TaskQueue {
-  DownloadQueue(this.runner, {this.maxConcurrent = 4});
+  DownloadQueue(this.runner, {this.maxConcurrent = 4, this.executionHost}) {
+    executionHost?.onPause = (reason) {
+      for (final job in jobs.where((j) => j.canPause).toList()) {
+        pause(job);
+        if (reason != null) job.error = AppFailure(reason);
+      }
+      if (!_closed) notifyListeners();
+    };
+  }
   final DownloadRunner runner;
+  final ExecutionHost? executionHost;
+
+  @override
+  void setLanguage(String language) {
+    executionHost?.language = language;
+    _updateExecutionHost();
+  }
+
+  @override
+  void notifyListeners() {
+    _updateExecutionHost();
+    super.notifyListeners();
+  }
+
+  void _updateExecutionHost() {
+    executionHost?.update(
+      persistenceError == null ? jobs : jobs.where((j) => j.active).toList(),
+      hasWorkers: _running.isNotEmpty,
+    );
+  }
+
   @override
   final List<DownloadJob> jobs = [];
   @override
@@ -126,7 +156,12 @@ class DownloadQueue extends TaskQueue {
       job.token = CancelToken();
       final future = _run(job);
       _running.add(future);
-      unawaited(future.whenComplete(() => _running.remove(future)));
+      unawaited(
+        future.whenComplete(() {
+          _running.remove(future);
+          if (!_closed) _updateExecutionHost();
+        }),
+      );
     }
   }
 
@@ -137,7 +172,9 @@ class DownloadQueue extends TaskQueue {
   Future<void> _run(DownloadJob job) async {
     try {
       job.error = null;
+      if (executionHost != null) await executionHost!.start();
       if (_store != null) await _checkpoint();
+      if (job.token.isCancelled) throw job.token.cancelError!;
       await runner.run(job, () {
         if (!_closed) notifyListeners();
       });
@@ -270,6 +307,8 @@ class DownloadQueue extends TaskQueue {
     }
     await Future.wait(_running.toList());
     await _persistenceTail;
+    executionHost?.onPause = null;
+    await executionHost?.stop();
     runner.dispose();
     await _store?.close();
   }

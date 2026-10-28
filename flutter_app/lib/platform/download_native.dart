@@ -8,10 +8,13 @@ import '../core/download_job.dart';
 import '../core/download_queue.dart';
 import '../core/io_download_runner.dart';
 import 'platform_native.dart' as platform;
+import 'android_execution_host.dart';
 export '../core/io_download_runner.dart';
 
-DownloadQueue createDownloadQueue(BiliApi api) =>
-    DownloadQueue(createDownloadRunner(api));
+DownloadQueue createDownloadQueue(BiliApi api) => DownloadQueue(
+  createDownloadRunner(api),
+  executionHost: platform.isAndroid ? AndroidExecutionHost() : null,
+);
 
 DownloadRunner createDownloadRunner(BiliApi api) => NativeDownloadRunner(
   api,

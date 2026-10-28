@@ -206,6 +206,7 @@ class AppController extends ChangeNotifier {
       error = e is AppFailure ? e : const AppFailure('serviceUnavailable');
     }
     if (_disposed) return;
+    queue.setLanguage(settings.locale);
     if (!queue.isRemote) await queue.setConcurrency(settings.concurrency);
     initializing = false;
     _notify();
@@ -413,6 +414,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> saveSettings({bool updateConcurrency = false}) async {
+    queue.setLanguage(settings.locale);
     _notify();
     try {
       if (updateConcurrency) await queue.setConcurrency(settings.concurrency);

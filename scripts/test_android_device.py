@@ -100,6 +100,7 @@ def main():
                     "BiliExportFixture:V", "TestRunner:I", "ActivityTaskManager:I", "ActivityManager:I",
                     "flutter:I", "ffmpeg-kit:I", "lowmemorykiller:I"], stdout=log, stderr=subprocess.STDOUT)
             instrument("ExportInstrumentationTest", 4, "instrumentation.log")
+            instrument("BackgroundDownloadTest", 3, "background-instrumentation.log")
 
             # A separate invocation is stopped while the provider holds a partial copy.
             # Polling is bounded to 20 seconds and exists only in this test harness.
@@ -131,6 +132,11 @@ def main():
             assert result.get("pageSize") == 16384
             assert json.loads((REPORTS / "process-death-result.json").read_text())["forcedStopCopyRecovered"] is True
             assert (REPORTS / "android-large-font.png").stat().st_size > 0
+            background = json.loads((REPORTS / "background-result.json").read_text())
+            for flag in ["activityDestroyedDownloadCompleted", "notificationDeniedDownloadCompleted",
+                         "sameEngineAndQueueReattached", "notificationPauseAndRangeResume", "timeoutCallbackPausesQueue"]:
+                assert background.get(flag) is True, flag
+            result.update(background)
             result.update(forcedStopCopyRecovered=True, abi=shell("getprop", "ro.product.cpu.abi"),
                           api=shell("getprop", "ro.build.version.sdk"), fontScale=shell("settings", "get", "system", "font_scale"),
                           compatibilityModeDisabled=True, systemImage=IMAGE)
