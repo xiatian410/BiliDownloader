@@ -29,7 +29,13 @@
 
 Chrome 完整流程通过：预览两种语言且响应不含签名 URL；英语字幕首次失败，在服务重启后单独重做，媒体和中文字幕请求次数不增加；360px 下取回 SRT 并由 ffprobe 识别为 SubRip。关闭整个浏览器后，8 个任务及 32 个附件在服务端完成。截图及结果位于 `artifacts/rewrite/`。真实 B站字幕内容与账号权限仍需另行验证，本地接口样本不能作为实网下载证明。
 
-独立 HTTPS 授权回归与 Linux 原生窗口/内置 FFmpeg 集成通过。本增量尚待 GitHub 四平台构建及包验证。继续沿用临时下载验证后删除完整包的方式，保留小型报告，避免累积产物；当前磁盘可用约 8.4 GB。
+主要实现位于 [字幕字段与 SRT 转换](../flutter_app/lib/core/subtitles.dart)、[附件执行与恢复](../flutter_app/lib/core/io_download_runner.dart)、[语言选项](../flutter_app/lib/ui/subtitle_options.dart)，并接入任务历史、设置、同源服务及中英文本。
+
+功能提交 `b2a8806` 已推送到 `flutter/migration`，对应的 [Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40683682232) 四项全部成功。Linux 112 项测试、原生窗口/内置 FFmpeg 及独立密钥环检查通过；Windows 71 项测试通过、2 项平台相关检查跳过，内置 FFmpeg 的窗口集成另行通过。Web CI 完成字幕、附件、整批后台任务及 HTTPS 认证流程。此前 `65e5827` 的构建因修正字段误判而主动取消，不作为最终验收结果。
+
+七个 CI 构建包已临时下载并验证：Windows ZIP/DLL、三个 tar.gz 完整性、三个 APK 签名/ZIP 16 KiB 对齐，以及 26 个 64 位原生库的 ELF LOAD/RELRO 检查通过。独立 Linux Web 服务包在不含 Flutter SDK 的 PATH 和其他工作目录下启动、生成私有密钥、授权、锁定、重启恢复与令牌轮换检查通过。新下载的完整包及解压目录均已删除，只新增约 32 KB 的 `artifacts/ci-b2a8806-validation/`，保存校验和、包验证报告及 CI 浏览器结果；构建包可从上述 Actions 运行下载。原有交付包与数据保留，磁盘可用约 8.2 GiB，没有安装新的大型环境。
+
+本轮公开 B站视频信息接口探测仍返回 HTTP 412，真实账号及字幕下载尚未验收。Android 仍为开发签名，未新增真机或 16 KiB 设备运行证明；Windows DPI 实机验证和 Android 后台/存储恢复仍在待办。未合并 main、发布 Release 或部署服务，整体重构继续进行。
 
 ## 自动封面与 NFO 增量
 
