@@ -1,5 +1,7 @@
 # Flutter 迁移与验证记录
 
+本文件保留最初迁移阶段的验证结果。最新功能、构建及设备测试状态请看 [重构实施状态](rewrite-progress.md)。
+
 本地验证日期：2026-10-28（北京时间）。原始代码基线：`6ec4d8871ead88fd73efb555856087c4c90c9d62`。Flutter 源码位于 `flutter_app/`，原 Python/PySide 源码 `src/` 保留。
 
 ## 改动范围

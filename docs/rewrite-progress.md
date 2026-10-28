@@ -2,6 +2,8 @@
 
 目标：自主完成界面重写、Windows/Linux/Android 多端适配和可用的 Web 下载，并以功能测试、实际渲染和构建验证结果。
 
+各增量保留当时的验证记录；当前状态以上方最新增量和末尾待办为准。
+
 ## 已落地，仍需最终回归
 
 - Material 3 深浅主题，桌面侧栏、窄桌面导航栏、手机底部导航。
@@ -23,7 +25,15 @@
 
 主要文件：[恢复状态机](../flutter_app/android/app/src/main/kotlin/io/github/xiatian410/bili_downloader/RecoverableExport.kt)、[Android 存储适配器](../flutter_app/android/app/src/main/kotlin/io/github/xiatian410/bili_downloader/AndroidFileExports.kt)、`MainActivity.kt`、`platform_native.dart`、中英错误文案及 `persistence_test.dart`。
 
-本地 114 项 Flutter 测试、静态分析、格式与差异检查通过；14 项 JVM 测试通过，包含独立进程在复制中、完成记录前后被强制终止，以及外部改动、源文件变化、提供方不执行截断、错误文件名、Unicode 与记录损坏；设备测试 APK 编译通过。新增 [CI 设备测试脚本](../scripts/test_android_device.py) 仅在 GitHub Actions 临时模拟器运行，不在开发机安装系统镜像。测试使用单独测试 APK 中的合成文档提供方，通过正常 URI 授权及实际 Binder/文件描述符调用，检查中断恢复、目标保护、16 KiB 环境的内置 FFmpeg 和 200% 字体界面。设备运行结果待本次 CI 验证，编译成功不等于设备通过。
+本地 114 项 Flutter 测试、静态分析、格式与差异检查通过；14 项 JVM 测试通过，包含独立进程在复制中、完成记录前后被强制终止，以及外部改动、源文件变化、提供方不执行截断、错误文件名、Unicode 与记录损坏；Kotlin/Java 设备测试编译通过。新增 [CI 设备测试脚本](../scripts/test_android_device.py) 仅在 GitHub Actions 临时模拟器运行，不在开发机安装系统镜像。测试提供方位于单独的测试 APK，只依赖 Android/JDK；通过正常持久 URI 授权及真实 Binder/文件描述符访问合成文件。授权组件与提供方均不进入发布 APK。
+
+最终功能提交 `2dc450c` 已推送到 `flutter/migration`，[Windows/Linux/Android/Web CI](https://github.com/xiatian410/BiliDownloader/actions/runs/40699097661) 四项全部成功。Linux 114 项测试、原生窗口/内置 FFmpeg 及独立密钥环检查通过；Windows 73 项测试通过、2 项平台相关检查跳过，原生窗口与内置 FFmpeg 集成另行通过。Web 完成字幕、附件、整批后台任务和 HTTPS 认证回归。
+
+Android 15（API 35）x86_64 的 16 KiB 模拟器中，4 项 instrumentation 测试和另行启动进程的恢复测试通过。测试确认复制中断后重做、完成记录复用且不再次写入、外部改动保护、中文目录及文件名、提供方权限错误，以及内置 FFmpeg 编码/解码。主机在目标文件只写入前缀时执行 `am force-stop`，再次启动测试进程后，原目录授权仍有效，导出内容与暂存源逐字节一致。设备返回页大小 16384，明确关闭 16 KiB 兼容模式；200% 字体下下载控件的无障碍节点与实际渲染截图已检查。此处运行的是 Debug 测试 APK，模拟器配置 4 GiB 内存；不代表 ARM 真机或全部 Android 版本均已验收。设备检查安排在发布构建之前。
+
+七个最终发布包已临时下载并校验：Windows ZIP/DLL、三个 tar.gz 完整性、三个 APK 签名与 ZIP 16 KiB 对齐，以及 26 个 64 位原生库的 ELF LOAD/RELRO 检查通过；发布 APK 中没有测试提供方或授权组件。独立 Linux Web 服务包在不含 Flutter SDK 的 PATH 和其他工作目录下，启动、生成私有密钥、授权、锁定、重启恢复及令牌轮换检查通过。验证后完整临时包及解压目录均已删除，只新增约 204 KiB 的 `artifacts/ci-2dc450c-validation/`，保存校验和、JVM/设备/浏览器结果及截图。本轮另清理约 1.1 GiB 的 Android Debug 派生文件，已有交付包与数据保留；当前可用空间约 6.9 GiB。未在本机安装模拟器或系统镜像。
+
+本轮公开视频接口单次探测仍返回 HTTP 412，真实账号及内容下载尚未验收。Android 发布包仍为开发签名。未合并 main、发布 Release 或部署远程服务，整体重构继续进行。
 
 仍有明确边界：若提供方已经创建文件，但进程在返回 URI 或保存 URI 前被停止，不能仅凭同名文件推断归属，仍要求用户检查目标或另选目录。读回校验不代表断电耐久性保证。导出记录保存在应用私有目录，仅含操作标识、文件名、URI、大小与摘要，不包含媒体正文或账号凭据。此增量不等于完成 Android 后台下载服务，也不能替代真机、第三方云盘提供方及实际系统目录选择器的验收。
 
@@ -117,7 +127,7 @@ CI 生成的独立 Linux Web 服务包在不含 Flutter SDK 的 PATH 和其他�
 1. 最终差异审查与剩余交互回归，继续覆盖不同浏览器和实际系统环境。
 2. 合并停止与恢复能力的设备验证；原生库若未确认停止，任务保持等待并提示重启，不冒险并发写入。当前进程中断测试不能作为突然断电或硬件故障保证。
 3. Web 认证配置在实际部署环境中的验证，以及真实接口和账号权限。当前已完成本地 HTTPS 代理与浏览器会话测试；服务重启后需重新登录 B站。
-4. Android 后台下载/通知与真机存储体验，Windows DPI 实机验证。SAF 导出恢复已加入持久记录与内容校验，仍需本轮设备验证；在创建目标但 URI 尚未提交的狭小窗口被终止时，仍需人工核对，不能冒险接管未知文件。
+4. Android 后台下载/通知与真机存储体验，Windows DPI 实机验证。SAF 导出恢复已通过上述 16 KiB 模拟器中的独立文档提供方和强制停止检查；实际系统目录选择器与第三方提供方仍需真机验证。在创建目标但 URI 尚未提交的狭小窗口被终止时，仍需人工核对，不能冒险接管未知文件。
 5. 命名模板、完整媒体库组织，以及合集/UP 主/收藏夹等计划能力继续分阶段实现并验证；CC 字幕与语言选择、自动封面及基础 NFO 已落地，真实来源验证仍未完成。
 6. 后续功能增量继续执行四平台构建、包验证和回归；正式 Android 签名与发布尚未配置。
 
