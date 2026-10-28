@@ -1,7 +1,8 @@
 // CI debug target only. Release builds use lib/main.dart and contain no fixture channel.
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
+
+import 'fixtures/held_http.dart';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -43,12 +44,10 @@ Future<void> main() async {
   );
   runApp(BiliDownloaderApp(controller: controller));
   final initialized = controller.initialize();
-  HttpServer? server;
+  HeldHttpFixture? server;
   Directory? fixtureDirectory;
-  Completer<void>? release;
   DownloadJob? current;
   List<int> bytes = [];
-  var rangeResumed = false;
 
   Future<void> until(bool Function() condition) async {
     if (condition()) return;
@@ -70,9 +69,7 @@ Future<void> main() async {
     await initialized;
     switch (call.method) {
       case 'start':
-        await server?.close(force: true);
-        release = Completer<void>();
-        rangeResumed = false;
+        await server?.close();
         fixtureDirectory = await Directory.systemTemp.createTemp(
           'bili-device-queue-',
         );
@@ -93,41 +90,8 @@ Future<void> main() async {
         ]);
         bytes = await File(source).readAsBytes();
         if (bytes.length < 8192) throw StateError('Fixture too short');
-        server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        api.fixtureUrl = 'http://127.0.0.1:${server!.port}/fixture.mp4';
-        server!.listen((request) async {
-          try {
-            final range = request.headers.value('range');
-            final match = RegExp(r'^bytes=(\d+)-(\d*)$')
-                .firstMatch(range ?? '');
-            final start = match == null ? 0 : int.parse(match[1]!);
-            final end = match == null || match[2]!.isEmpty
-                ? bytes.length - 1
-                : int.parse(match[2]!);
-            if (start > 0) rangeResumed = true;
-            request.response.headers.set('etag', '"fixture-v1"');
-            request.response.contentLength = end - start + 1;
-            if (match != null) {
-              request.response.statusCode = 206;
-              request.response.headers.set(
-                'content-range',
-                'bytes $start-$end/${bytes.length}',
-              );
-            }
-            final split = min(end + 1, start + 4096);
-            request.response.add(bytes.sublist(start, split));
-            await request.response.flush();
-            if (end > start) {
-              await release!.future.timeout(const Duration(seconds: 35));
-            }
-            if (split <= end) {
-              request.response.add(bytes.sublist(split, end + 1));
-            }
-            await request.response.close();
-          } catch (_) {
-            request.response.close().ignore();
-          }
-        });
+        server = await HeldHttpFixture.open(bytes);
+        api.fixtureUrl = server!.url;
         current = DownloadJob(
           const Episode(
             cid: 701,
@@ -151,7 +115,7 @@ Future<void> main() async {
           'received': current!.received,
         };
       case 'finish':
-        if (!release!.isCompleted) release!.complete();
+        server!.release();
         await until(() => !current!.active);
         if (current!.state != JobState.completed) {
           throw StateError(
@@ -176,7 +140,7 @@ Future<void> main() async {
           'decoded': true,
           'id': current!.id,
           'queue': identityHashCode(queue),
-          'rangeResumed': rangeResumed,
+          'rangeResumed': server!.rangeResumed,
         };
       case 'paused':
         await until(() => !current!.active);
