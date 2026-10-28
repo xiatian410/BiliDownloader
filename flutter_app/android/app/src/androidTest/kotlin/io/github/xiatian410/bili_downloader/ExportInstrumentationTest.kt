@@ -31,6 +31,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 object DeviceExportFixture {
     const val authority = "io.github.xiatian410.bili_downloader.test.documents"
@@ -53,9 +54,10 @@ object DeviceExportFixture {
                 ready.countDown()
             }
         }
-        context.startActivity(Intent().setClassName("${context.packageName}.test",
-            "io.github.xiatian410.bili_downloader.FixtureGrantActivity")
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("grantResult", receiver))
+        context.sendBroadcast(Intent().setClassName("${context.packageName}.test",
+            "io.github.xiatian410.bili_downloader.FixtureGrantReceiver")
+            .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or Intent.FLAG_RECEIVER_FOREGROUND)
+            .putExtra("grantResult", receiver))
         check(ready.await(15, TimeUnit.SECONDS) && accepted) { "Fixture grant was not acknowledged" }
         context.contentResolver.takePersistableUriPermission(tree,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -146,6 +148,7 @@ class ExportInstrumentationTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
         val ready = CountDownLatch(1)
+        val listening = AtomicBoolean(true)
         fun visible(): Boolean {
             val root = automation.rootInActiveWindow ?: return false
             var visited = 0
@@ -160,7 +163,12 @@ class ExportInstrumentationTest {
             }
             return try { contains(root) } finally { root.recycle() }
         }
-        automation.setOnAccessibilityEventListener { if (visible()) ready.countDown() }
+        automation.setOnAccessibilityEventListener {
+            if (listening.get()) {
+                try { if (visible()) ready.countDown() }
+                catch (_: IllegalStateException) { /* A queued event can outlive UiAutomation teardown. */ }
+            }
+        }
         try {
             ActivityScenario.launch<MainActivity>(Intent(fixture.context, MainActivity::class.java)).use { scenario ->
                 val frame = CountDownLatch(1)
@@ -184,7 +192,7 @@ class ExportInstrumentationTest {
                 output.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 image.recycle()
             }
-        } finally { automation.setOnAccessibilityEventListener(null) }
+        } finally { listening.set(false); automation.setOnAccessibilityEventListener(null) }
         fixture.report.put("flutterDownloadControlsVisible", true)
     }
 }

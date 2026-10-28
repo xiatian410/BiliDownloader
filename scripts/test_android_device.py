@@ -64,6 +64,7 @@ def main():
             raise RuntimeError(f"{SERIAL} is already in use")
         emulator = None
         interrupted = None
+        device_log = None
         try:
             with (REPORTS / "emulator.log").open("w") as log:
                 emulator = subprocess.Popen([str(sdk / "emulator/emulator"), "-avd", "bili-16k",
@@ -94,6 +95,10 @@ def main():
             for path in [apk / "debug/app-debug.apk", apk / "androidTest/debug/app-debug-androidTest.apk"]:
                 assert path.is_file(), f"Missing {path}"
                 run([*adb, "install", "-t", str(path)], timeout=90)
+            with (REPORTS / "test-device.log").open("w") as log:
+                device_log = subprocess.Popen([*adb, "logcat", "-v", "threadtime", "*:W",
+                    "BiliExportFixture:V", "TestRunner:I", "ActivityTaskManager:I", "ActivityManager:I",
+                    "flutter:I", "ffmpeg-kit:I", "lowmemorykiller:I"], stdout=log, stderr=subprocess.STDOUT)
             instrument("ExportInstrumentationTest", 4, "instrumentation.log")
 
             # A separate invocation is stopped while the provider holds a partial copy.
@@ -133,6 +138,7 @@ def main():
             print(json.dumps(result, indent=2))
         finally:
             stop(interrupted)
+            stop(device_log)
             try:
                 # Keep partial test evidence and process-exit reasons even on failure.
                 run([*adb, "pull", f"/sdcard/Android/data/{PACKAGE}/files/test-reports/.", str(REPORTS)],
