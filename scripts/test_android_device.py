@@ -68,7 +68,7 @@ def main():
             with (REPORTS / "emulator.log").open("w") as log:
                 emulator = subprocess.Popen([str(sdk / "emulator/emulator"), "-avd", "bili-16k",
                     "-port", "5554", "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
-                    "-wipe-data", "-gpu", "swiftshader_indirect", "-memory", "2048", "-cores", "2"],
+                    "-wipe-data", "-gpu", "swiftshader_indirect", "-memory", "4096", "-cores", "2"],
                     env=environment, stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
@@ -135,6 +135,11 @@ def main():
         finally:
             stop(interrupted)
             try:
+                # Keep partial test evidence and process-exit reasons even on failure.
+                run([*adb, "pull", f"/sdcard/Android/data/{PACKAGE}/files/test-reports/.", str(REPORTS)],
+                    timeout=20, check=False)
+                exits = shell("dumpsys", "activity", "exit-info", PACKAGE, timeout=20, check=False)
+                (REPORTS / "process-exits.log").write_text(exits)
                 logs = run([*adb, "logcat", "-d", "-t", "3000"], timeout=20, check=False)
                 (REPORTS / "logcat.log").write_text(logs.stdout + logs.stderr)
             finally:

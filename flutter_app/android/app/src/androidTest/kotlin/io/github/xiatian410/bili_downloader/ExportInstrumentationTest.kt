@@ -18,8 +18,10 @@ import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -33,6 +35,9 @@ object DeviceExportFixture {
     val report = JSONObject()
     fun source(name: String) = File(context.filesDir, "device-export/$name").apply { parentFile!!.mkdirs() }
     fun export(name: String, folder: String = ""): String {
+        // Match the production directory picker's persisted grant, including force-stop.
+        context.contentResolver.takePersistableUriPermission(tree,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         val done = CountDownLatch(1)
         var uri: String? = null
         var error: String? = null
@@ -60,6 +65,7 @@ object DeviceExportFixture {
 }
 
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class ExportInstrumentationTest {
     private val fixture = DeviceExportFixture
     @After fun report() { fixture.saveReport("device-result.json") }
@@ -98,7 +104,7 @@ class ExportInstrumentationTest {
         val pageSize = Os.sysconf(OsConstants._SC_PAGESIZE)
         assertEquals(16384L, pageSize)
         val file = File(fixture.context.cacheDir, "device-ffmpeg.mp4")
-        val execute = Class.forName("com.arthenica.ffmpegkit.FFmpegKit").getMethod("execute", String::class.java)
+        val execute = Class.forName("com.antonkarpenko.ffmpegkit.FFmpegKit").getMethod("execute", String::class.java)
         fun run(command: String) {
             val session = execute.invoke(null, command)
             val code = session.javaClass.getMethod("getReturnCode").invoke(session)
@@ -112,7 +118,7 @@ class ExportInstrumentationTest {
         fixture.report.put("pageSize", pageSize).put("bundledFfmpegEncodedAndDecoded", true)
     }
 
-    @Test fun flutterWindowShowsTheDownloadControls() {
+    @Test fun windowShowsFlutterDownloadControls() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
         val ready = CountDownLatch(1)
@@ -165,6 +171,9 @@ class ExportProcessDeathTest {
         fail("Host did not stop the copy")
     }
     @Test fun recover() {
+        assertTrue(DeviceExportFixture.context.contentResolver.persistedUriPermissions.any {
+            it.uri == DeviceExportFixture.tree && it.isReadPermission && it.isWritePermission
+        })
         val uri = DeviceExportFixture.export("process-death.bin")
         assertArrayEquals(DeviceExportFixture.bytes,
             DeviceExportFixture.context.contentResolver.openInputStream(Uri.parse(uri))!!.use { it.readBytes() })
