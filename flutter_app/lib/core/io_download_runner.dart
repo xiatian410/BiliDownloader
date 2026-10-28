@@ -554,7 +554,6 @@ class NativeDownloadRunner implements DownloadRunner {
         );
         if (matches.isEmpty) throw const AppFailure('subtitleSourceChanged');
         final current = matches.first;
-        if (current.locked) throw const AppFailure('subtitleLocked');
         final content = await api.fetchSubtitle(current, cancel: job.token);
         final duplicate =
             job.subtitleTracks

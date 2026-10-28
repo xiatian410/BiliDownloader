@@ -32,10 +32,6 @@ class Strings {
       '接口要求先登录 B站才能查看字幕',
       'The source requires Bilibili sign-in to view subtitles',
     ],
-    'subtitleLocked': [
-      '此字幕轨道尚未获准访问',
-      'Access to this subtitle track is restricted',
-    ],
     'subtitleIdentityMismatch': [
       '字幕信息与当前分集不符',
       'Subtitle metadata belongs to a different episode',

@@ -30,6 +30,7 @@ Map<String, dynamic> track(String language, String id) => {
   'id_str': id,
   'lan': language,
   'lan_doc': language == 'zh-CN' ? '中文' : language,
+  'is_lock': true,
   'subtitle_url': '//aisubtitle.hdslb.com/$id.json?token=transient',
 };
 Matcher failure(String key) =>
@@ -146,7 +147,7 @@ class SubtitleApi extends BiliApi {
 }
 
 void main() {
-  test('player mapping preserves language, large IDs, AI and locks and distinguishes missing data', () {
+  test('player mapping preserves language, large IDs and AI without treating is_lock as a download ban', () {
     Map<String, dynamic> data(List<dynamic> rows) => {
       'cid': 7,
       'aid': 1,
@@ -156,13 +157,13 @@ void main() {
       data([
         track('zh-CN', '123456789012345678'),
         {...track('ai-en', '2'), 'ai_type': 1},
-        {...track('ja', '3'), 'is_lock': true, 'subtitle_url': null},
+        track('ja', '3'),
       ]),
       episode,
     );
     expect(parsed.first.id, '123456789012345678');
     expect(parsed[1].automatic, true);
-    expect(parsed[2].locked, true);
+    expect(parsed[2].url, contains('/3.json'));
     expect(
       jsonEncode(parsed.map((t) => t.toJson()).toList()),
       isNot(contains('token=')),
@@ -308,6 +309,17 @@ void main() {
     await expectLater(
       api.fetchSubtitle(tracks.first),
       throwsA(isA<DioException>()),
+    );
+    adapter.errors[tracks.first.id] = 403;
+    await expectLater(
+      api.fetchSubtitle(tracks.first),
+      throwsA(
+        isA<DioException>().having(
+          (e) => e.response?.statusCode,
+          'status',
+          403,
+        ),
+      ),
     );
     adapter.errors.clear();
     adapter.body = [255];

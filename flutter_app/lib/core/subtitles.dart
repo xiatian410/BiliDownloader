@@ -13,17 +13,15 @@ class SubtitleTrack {
     required this.label,
     this.url = '',
     this.automatic = false,
-    this.locked = false,
   });
   final String id, language, label, url;
-  final bool automatic, locked;
+  final bool automatic;
   String get key => 'subtitle:$language:$id';
   Map<String, dynamic> toJson() => {
     'id': id,
     'language': language,
     'label': label,
     'automatic': automatic,
-    'locked': locked,
   };
   factory SubtitleTrack.fromJson(Map m) {
     if (m['id'] is! String ||
@@ -38,7 +36,6 @@ class SubtitleTrack {
       language: m['language'] as String,
       label: m['label'] as String,
       automatic: m['automatic'] == true,
-      locked: m['locked'] == true,
     );
   }
 }
@@ -73,12 +70,13 @@ List<SubtitleTrack> playerSubtitles(
       'id': id,
       'language': language,
       'label': row['lan_doc'] ?? language,
-      'locked': row['is_lock'] == true,
       'automatic':
           language is String && language.toLowerCase().startsWith('ai-') ||
           row['ai_type'] is num && row['ai_type'] > 0,
     });
-    if (!track.locked && (url is! String || url.isEmpty)) {
+    // is_lock also occurs on usable tracks. It is not a download permission.
+    // Honor actual API/resource errors instead of inventing a local access gate.
+    if (url is! String || url.isEmpty) {
       throw const AppFailure('invalidSubtitle');
     }
     result.putIfAbsent(
@@ -88,8 +86,7 @@ List<SubtitleTrack> playerSubtitles(
         language: track.language,
         label: track.label,
         automatic: track.automatic,
-        locked: track.locked,
-        url: url is String ? url : '',
+        url: url,
       ),
     );
   }

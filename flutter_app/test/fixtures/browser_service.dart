@@ -21,17 +21,23 @@ class BrowserFixtureApi extends BiliApi {
   Future<List<SubtitleTrack>> subtitles(
     Episode episode, {
     CancelToken? cancel,
-  }) async => [
-    for (final language in ['zh-CN', 'ai-en'])
-      SubtitleTrack(
-        id: '${episode.cid}${language == 'zh-CN' ? '01' : '02'}',
-        language: language,
-        label: language == 'zh-CN' ? '中文' : '英语（自动生成）',
-        automatic: language == 'ai-en',
-        url:
-            'https://aisubtitle.hdslb.com/${episode.cid}.json?token=fixture-transient',
-      ),
-  ];
+  }) async => playerSubtitles({
+    'cid': episode.cid,
+    'aid': episode.aid,
+    'subtitle': {
+      'subtitles': [
+        for (final language in ['zh-CN', 'ai-en'])
+          {
+            'id_str': '${episode.cid}${language == 'zh-CN' ? '01' : '02'}',
+            'lan': language,
+            'lan_doc': language == 'zh-CN' ? '中文' : '英语',
+            'is_lock': true,
+            'subtitle_url':
+                'https://aisubtitle.hdslb.com/${episode.cid}.json?token=fixture-transient',
+          },
+      ],
+    },
+  }, episode);
   @override
   Future<String> fetchSubtitle(
     SubtitleTrack track, {
