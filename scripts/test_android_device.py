@@ -12,7 +12,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "io.github.xiatian410.bili_downloader"
-IMAGE = "system-images;android-35;google_apis_ps16k;x86_64"
+IMAGE = "system-images;android-36;google_apis_ps16k;x86_64"
 SERIAL = "emulator-5554"
 REPORTS = ROOT / "artifacts/android-device"
 
@@ -69,7 +69,7 @@ def main():
             with (REPORTS / "emulator.log").open("w") as log:
                 emulator = subprocess.Popen([str(sdk / "emulator/emulator"), "-avd", "bili-16k",
                     "-port", "5554", "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
-                    "-wipe-data", "-gpu", "swiftshader_indirect", "-memory", "4096", "-cores", "2"],
+                    "-wipe-data", "-gpu", "swiftshader_indirect", "-memory", "6144", "-cores", "2"],
                     env=environment, stdout=log, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
@@ -139,7 +139,7 @@ def main():
             result.update(background)
             result.update(forcedStopCopyRecovered=True, abi=shell("getprop", "ro.product.cpu.abi"),
                           api=shell("getprop", "ro.build.version.sdk"), fontScale=shell("settings", "get", "system", "font_scale"),
-                          compatibilityModeDisabled=True, systemImage=IMAGE)
+                          compatibilityModeDisabled=True, systemImage=IMAGE, configuredEmulatorRamMiB=6144)
             (REPORTS / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print(json.dumps(result, indent=2))
         finally:

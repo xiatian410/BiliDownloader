@@ -27,7 +27,7 @@
 
 主要文件：`DownloadRuntime.kt`、`DownloadService.kt`、`MainActivity.kt`、`AndroidManifest.xml`、`execution_host.dart`、`android_execution_host.dart`、`download_queue.dart`、下载页与中英文案。只在 CI 调试构建中使用 `integration_test/android_device_app.dart`，提供本机 HTTP 样本和控制通道；发布构建继续使用 `lib/main.dart`。
 
-本地静态分析、121 项完整 Flutter 测试及追加的关闭回调测试、14 项 JVM 测试、Android 调试 APK 及设备测试 APK 编译通过，Python 语法和差异检查通过。新队列测试覆盖服务启动前取消、拒绝启动、串行及并发任务共享服务、通知暂停、超时、历史提交阻塞、磁盘写入失败后的服务释放和队列关闭后忽略迟到的系统回调。新增设备用例将验证关闭 Activity 后真实 HTTP 下载与摘要/解码、重新附着到同一引擎、通知权限拒绝、通知暂停与 Range 恢复，以及实际超时回调；在远程模拟器完成前不视为已通过。测试不在本机安装模拟器镜像。
+本地静态分析、121 项完整 Flutter 测试及追加的关闭回调测试、14 项 JVM 测试、Android 调试 APK 及设备测试 APK 编译通过，Python 语法和差异检查通过。新队列测试覆盖服务启动前取消、拒绝启动、串行及并发任务共享服务、通知暂停、超时、历史提交阻塞、磁盘写入失败后的服务释放和队列关闭后忽略迟到的系统回调。新增设备用例将验证关闭 Activity 后真实 HTTP 下载与摘要/解码、重新附着到同一引擎、通知权限拒绝、通知暂停与 Range 恢复，以及实际超时回调；在远程模拟器完成前不视为已通过。测试不在本机安装模拟器镜像。API 35 镜像分别出现了系统定位服务及 ART JIT 的原生崩溃，日志保留；当前设备检查改用官方 API 36 的 16 KiB 镜像、6 GiB 模拟器内存，并在启动设备前停止临时构建机上的 Gradle daemon。保留 JIT、权限检查和 16 KiB 页大小要求，未增加失败自动重跑。
 
 依据：[Flutter 共享引擎](https://docs.flutter.dev/add-to-app/android/add-flutter-screen)、[前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types)、[系统超时](https://developer.android.com/develop/background-work/services/fgs/timeout)、[通知授权](https://developer.android.com/develop/ui/compose/notifications/notification-permission)。物理设备锁屏、厂商省电策略和长时间后台运行仍需实机验收。
 

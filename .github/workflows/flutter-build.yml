@@ -76,6 +76,7 @@ jobs:
           flutter build apk --debug --target-platform android-x64 --target integration_test/android_device_app.dart
           cd android
           ./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest -Ptarget-platform=android-x64 -Ptarget=integration_test/android_device_app.dart --no-daemon
+          ./gradlew --stop
           mkdir -p ../../artifacts/android-export-tests
           cp ../build/app/test-results/testDebugUnitTest/TEST-*.xml ../../artifacts/android-export-tests/
       - name: Test Android on a disposable 16 KiB emulator
@@ -83,7 +84,7 @@ jobs:
         run: |
           test -c /dev/kvm
           sudo chown "$(id -u):$(id -g)" /dev/kvm
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'emulator' 'system-images;android-35;google_apis_ps16k;x86_64'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'emulator' 'system-images;android-36;google_apis_ps16k;x86_64'
           python3 scripts/test_android_device.py
       - name: Preserve Android device failure evidence
         if: failure() && matrix.target == 'android'
