@@ -10,6 +10,8 @@ import 'core/download_queue.dart';
 import 'core/download_job.dart';
 import 'core/models.dart';
 import 'core/settings.dart';
+import 'core/remote_api.dart';
+import 'core/wire.dart';
 import 'platform/platform.dart' as platform;
 
 abstract class AppStore {
@@ -81,6 +83,9 @@ class AppController extends ChangeNotifier {
   bool busy = false;
   int tab = 0, step = 0;
   VideoInfo? info;
+  final List<VideoInfo> sources = [];
+  final Map<String, AppFailure> resolveErrors = {};
+  int resolvedCount = 0, resolveTotal = 0;
   PlayableMedia? media;
   Set<int> selected = {};
   final Map<int, bool> audioOnlyOverrides = {};
@@ -89,7 +94,7 @@ class AppController extends ChangeNotifier {
   String specialAudio = '', audioLanguage = '';
   CancelToken? _request;
   bool _disposed = false;
-  bool get loggedIn => api.cookies.isNotEmpty;
+  bool get loggedIn => api.authenticated;
 
   Future<void> initialize() async {
     try {
@@ -109,6 +114,40 @@ class AppController extends ChangeNotifier {
       if (!_disposed) api.cookies = cookies;
     } catch (_) {
       notice = 'secureStorageError';
+    }
+    if (_disposed) return;
+    try {
+      await api.initializeSession();
+      if (api is RemoteBiliApi) {
+        final remote = api as RemoteBiliApi;
+        queue.add(
+          remote.restoredJobs.map((raw) {
+            final data = Map<String, dynamic>.from(raw);
+            final job = DownloadJob(
+              episodeFromJson(Map<String, dynamic>.from(data['episode'])),
+              optionsFromJson(
+                Map<String, dynamic>.from(data['options']),
+                directory: '',
+              ),
+            );
+            job.remoteId = data['id'] as String;
+            job.received = data['received'] as int;
+            job.total = data['total'] as int;
+            job.actualQuality = data['actualQuality'] as int?;
+            if (['completed', 'paused', 'failed'].contains(data['state'])) {
+              job.state = JobState.values.byName(data['state'] as String);
+            }
+            job.outputs.addAll(
+              (data['outputs'] as List).map(
+                (f) => remote.origin.resolve(f['url'] as String).toString(),
+              ),
+            );
+            return job;
+          }),
+        );
+      }
+    } catch (e) {
+      error = e is AppFailure ? e : const AppFailure('serviceUnavailable');
     }
     if (_disposed) return;
     queue.setConcurrency(settings.concurrency);
@@ -133,15 +172,18 @@ class AppController extends ChangeNotifier {
 
   void changeSelection(int index, bool checked) {
     checked ? selected.add(index) : selected.remove(index);
+    media = null;
     _notify();
   }
 
   void selectAll() {
     selected = {for (var i = 0; i < (info?.episodes.length ?? 0); i++) i};
+    media = null;
     _notify();
   }
 
   void invertSelection() {
+    media = null;
     selected = {
       for (var i = 0; i < (info?.episodes.length ?? 0); i++)
         if (!selected.contains(i)) i,
@@ -152,6 +194,7 @@ class AppController extends ChangeNotifier {
   void selectionText(String input) {
     try {
       selected = parseSelection(input, info!.episodes.length);
+      media = null;
       error = null;
     } catch (e) {
       fail(e);
@@ -176,23 +219,90 @@ class AppController extends ChangeNotifier {
     ultra: settings.ultra,
     dolby: settings.dolby,
     limitTitle: settings.limitTitle,
+    flatDirectory: settings.flatDirectory,
+    onlyDanmaku: settings.onlyDanmaku,
   );
 
   Future<void> resolve(String input) async {
-    final id = VideoId.parse(input);
-    if (id == null || busy) return;
+    final batch = VideoId.parseMany(input);
+    if (busy) return;
+    if (batch.ids.isEmpty || batch.ids.length > 100) {
+      fail(const AppFailure('invalidBatch'));
+      return;
+    }
     await perform(() async {
       _request = CancelToken();
-      info = await api.resolve(id, cancel: _request);
-      selected = {for (var i = 0; i < info!.episodes.length; i++) i};
+      sources.clear();
+      resolveErrors.clear();
+      info = null;
+      selected.clear();
+      resolvedCount = 0;
+      resolveTotal = batch.ids.length;
       audioOnlyOverrides.clear();
       danmakuOverrides.clear();
       media = null;
       specialAudio = '';
       audioLanguage = '';
+      for (final id in batch.ids) {
+        if (_request!.isCancelled) break;
+        try {
+          sources.add(await api.resolve(id, cancel: _request));
+        } catch (e) {
+          if (e is DioException && CancelToken.isCancel(e)) break;
+          resolveErrors[id.label] = e is AppFailure
+              ? e
+              : const AppFailure('invalidResponse');
+        }
+        resolvedCount++;
+        _notify();
+      }
+      final episodes = <String, Episode>{};
+      for (final source in sources) {
+        for (final episode in source.episodes) {
+          episodes.putIfAbsent(episode.identity, () => episode);
+        }
+      }
+      if (episodes.isNotEmpty) {
+        final first = sources.first;
+        info = VideoInfo(
+          title: first.title,
+          description: first.description,
+          cover: first.cover,
+          author: first.author,
+          id: first.id,
+          episodes: episodes.values.toList(),
+        );
+        selected = {for (var i = 0; i < info!.episodes.length; i++) i};
+      }
       step = 1;
     });
   }
+
+  void cancelResolve() => _request?.cancel('user');
+
+  Future<void> saveCover() => perform(() async {
+    if (info == null || info!.cover.isEmpty) return;
+    final response = await api.dio.get<List<int>>(
+      info!.cover,
+      options: Options(responseType: ResponseType.bytes, headers: biliHeaders),
+    );
+    final type = response.headers.value('content-type')?.split(';').first;
+    final extension = const {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/avif': 'avif',
+    }[type];
+    if (extension == null || response.data == null) {
+      throw const AppFailure('invalidResponse');
+    }
+    await platform.saveBytes(
+      Uint8List.fromList(response.data!),
+      '${safeFilename(info!.title)}.$extension',
+      settings.directory,
+    );
+    notice = 'saved';
+  });
 
   Future<void> loadOptions() async {
     if (selected.isEmpty) return;
@@ -203,18 +313,18 @@ class AppController extends ChangeNotifier {
         options(),
         cancel: _request,
       );
-      if (media!.qualities.isEmpty) throw const AppFailure('noStreams');
-      quality = media!.qualities.first.id;
+      if (!settings.onlyAudio && media!.availableQualities.isEmpty) {
+        throw const AppFailure('noStreams');
+      }
+      if (media!.availableQualities.isNotEmpty) {
+        quality = media!.availableQualities.first.id;
+      }
       step = 3;
     });
   }
 
   void enqueue() {
-    if (kIsWeb) {
-      fail(const AppFailure('webDownloadUnsupported'));
-      return;
-    }
-    if (settings.directory.isEmpty || selected.isEmpty) {
+    if ((!kIsWeb && settings.directory.isEmpty) || selected.isEmpty) {
       fail(const AppFailure('invalidDirectory'));
       return;
     }
@@ -223,6 +333,8 @@ class AppController extends ChangeNotifier {
     tab = 1;
     step = 0;
     info = null;
+    sources.clear();
+    resolveErrors.clear();
     media = null;
     selected = {};
     notice = null;

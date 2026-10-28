@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bili_downloader/app.dart';
 import 'package:bili_downloader/app_controller.dart';
@@ -30,6 +31,11 @@ class LockedStore extends MemoryStore {
 }
 
 void main() {
+  setUpAll(() async {
+    final font = FontLoader('HarmonyOS Sans SC')
+      ..addFont(rootBundle.load('assets/HarmonyOS_Sans_SC_Regular.ttf'));
+    await font.load();
+  });
   testWidgets('locked keyring does not block first frame or late login', (
     tester,
   ) async {
@@ -58,7 +64,9 @@ void main() {
   });
 
   for (final width in [360.0, 760.0]) {
-    testWidgets('complete four-step flow at width $width', (tester) async {
+    testWidgets('parse select configure and enqueue at width $width', (
+      tester,
+    ) async {
       tester.view.reset();
       await tester.binding.setSurfaceSize(Size(width, 700));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -76,17 +84,30 @@ void main() {
         'BV1xx411c7mD',
       );
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('wizard-next')));
+      await tester.tap(find.byKey(const ValueKey('parse-input')));
       await tester.pumpAndSettle();
       expect(find.text('测试视频 / Test video'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('wizard-next')));
+      await tester.ensureVisible(find.byKey(const ValueKey('episode-1')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('episode-1')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('wizard-next')));
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('load-options')),
+        350,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('new-download-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('load-options')));
       await tester.pumpAndSettle();
       expect(find.text('1080P'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('wizard-next')));
+      await tester.ensureVisible(find.byKey(const ValueKey('enqueue')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('enqueue')));
       await tester.pumpAndSettle();
       expect(c.queue.jobs.length, 1);
       expect(c.queue.jobs.single.state, JobState.completed);
@@ -99,5 +120,49 @@ void main() {
       expect(find.text('Sign in with QR'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+  }
+  for (final width in [320.0, 360.0, 600.0, 900.0, 1440.0]) {
+    for (final theme in ['light', 'dark']) {
+      testWidgets('responsive $width $theme at 200 percent font', (
+        tester,
+      ) async {
+        await tester.binding.setSurfaceSize(Size(width, 760));
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final c = AppController(
+          api: WizardApi(),
+          queue: DownloadQueue(CompletedRunner()),
+          store: MemoryStore(),
+        );
+        addTearDown(c.dispose);
+        await c.initialize();
+        c.settings.theme = theme;
+        c.settings.locale = theme == 'dark' ? 'en' : 'zh';
+        await tester.pumpWidget(BiliDownloaderApp(controller: c));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const ValueKey('tab-2')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const ValueKey('tab-0')));
+        await c.resolve('BV1xx411c7mD');
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.byKey(const ValueKey('load-options')),
+          350,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const PageStorageKey('new-download-scroll')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await c.loadOptions();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
   }
 }

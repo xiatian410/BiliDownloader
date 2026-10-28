@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 
 import 'app.dart';
 import 'app_controller.dart';
-import 'core/bili_api.dart';
+import 'platform/api_factory.dart';
 import 'core/download_queue.dart';
 import 'platform/download_runner.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final api = BiliApi();
+  final api = createBiliApi();
   final controller = AppController(
     api: api,
     queue: DownloadQueue(createDownloadRunner(api)),

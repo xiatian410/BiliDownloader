@@ -74,7 +74,7 @@ Future<String> publishFile(
 Future<void> saveBytes(Uint8List data, String name, String directory) async {
   final root = await workingDirectory(directory);
   await Directory(root).create(recursive: true);
-  final file = File(p.join(root, safeFilename(name)));
+  final file = File(p.join(root, safeFilename(name, limit: false)));
   if (await file.exists()) throw const AppFailure('fileExists');
   await file.writeAsBytes(data, flush: true);
   await publishFile(file.path, directory, 'Covers');

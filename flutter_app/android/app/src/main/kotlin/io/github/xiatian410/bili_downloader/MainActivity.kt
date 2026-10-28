@@ -41,7 +41,7 @@ class MainActivity : FlutterActivity() {
                         val folder = requireNotNull(call.argument<String>("folder"))
                         val name = requireNotNull(call.argument<String>("name"))
                         require(!folder.contains('/') && !name.contains('/') && folder != ".." && name != "..")
-                        val directory = child(root, tree, folder) ?: DocumentsContract.createDocument(contentResolver, root, DocumentsContract.Document.MIME_TYPE_DIR, folder)
+                        val directory = if (folder.isEmpty()) root else child(root, tree, folder) ?: DocumentsContract.createDocument(contentResolver, root, DocumentsContract.Document.MIME_TYPE_DIR, folder)
                             ?: error("Cannot create destination folder")
                         check(child(directory, tree, name) == null) { "Destination already exists" }
                         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase()) ?: "application/octet-stream"

@@ -10,6 +10,9 @@ class AppSettings {
   bool dolby = false;
   bool clipboard = true;
   bool limitTitle = true;
+  bool flatDirectory = false;
+  bool onlyDanmaku = false;
+  String theme = 'system';
 
   Map<String, dynamic> toJson() => {
     'directory': directory,
@@ -23,6 +26,9 @@ class AppSettings {
     'dolby': dolby,
     'clipboard': clipboard,
     'limitTitle': limitTitle,
+    'flatDirectory': flatDirectory,
+    'onlyDanmaku': onlyDanmaku,
+    'theme': theme,
   };
   factory AppSettings.fromJson(Map<String, dynamic> data) {
     final s = AppSettings();
@@ -40,6 +46,11 @@ class AppSettings {
     s.dolby = data['dolby'] == true;
     s.clipboard = data['clipboard'] != false;
     s.limitTitle = data['limitTitle'] != false;
+    s.flatDirectory = data['flatDirectory'] == true;
+    s.onlyDanmaku = data['onlyDanmaku'] == true;
+    if (['system', 'light', 'dark'].contains(data['theme'])) {
+      s.theme = data['theme'] as String;
+    }
     return s;
   }
   AppSettings();

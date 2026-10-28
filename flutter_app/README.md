@@ -4,18 +4,20 @@ Flutter migration of the Python/PySide application. The original `src/` remains 
 
 ## Features
 
-- Four tabs and four-step input → details → episodes → options workflow.
+- Adaptive Material 3 workspace: desktop sidebar, compact rail and mobile bottom navigation, with system/light/dark themes.
+- Batch input with per-source errors, episode search, selection and output previews.
 - BV/AV video and MD/EP series resolution, WBI-signed playback URLs, QR sign-in.
 - Maximum quality, preferred AVC/HEVC/AV1 codec, optional FLAC/Dolby and AI dubbed audio.
 - Concurrent download queue (1–8), pause/resume, bounded network retries and one expired-link refresh.
 - HTTP Range and resource validation before appending partial downloads; existing output files are not overwritten.
-- FFmpeg stream-copy merge, audio-only mode, separate audio retention and ASS comments.
+- FFmpeg stream-copy merge, audio-only/comment-only modes, separate audio retention and ASS comments.
+- Stable media identifiers in output names, flat or grouped directories, searchable tasks and scoped batch actions.
 - Android system folder selection/export through the Storage Access Framework.
 - Chinese/English UI; credentials use the OS credential store, never plain preferences.
 
 ## Toolchain and commands
 
-Validated toolchain target: Flutter **3.47.8**, Dart **3.13.7**, Java **17**, Android API **36**, NDK **28.2.13676358**. Native FFmpeg is provided by the locked `ffmpeg_kit_flutter_new_min` dependency. No external Python, private server key or manually configured FFmpeg executable is needed.
+Validated toolchain target: Flutter **3.47.8**, Dart **3.13.7**, Java **17**, Android API **36**, NDK **28.2.13676358**. Native FFmpeg is provided by the locked `ffmpeg_kit_flutter_new_min` dependency. Native apps need no external Python or manually configured FFmpeg executable. The Web service uses an external `ffmpeg` executable on PATH.
 
 ```sh
 cd flutter_app
@@ -56,13 +58,13 @@ Build artifacts go to the root `artifacts/` directory (ignored by Git). `.github
 - Release APKs currently use the generated **development signing key**. Configure a private release signing key before distributing updates to users or publishing to a store. No signing key is committed.
 - The app requests Internet access and user-selected folder access; it does not request unrestricted storage access.
 
-## Web feasibility build
+## Web download service
 
-`flutter build web` compiles the actual shared UI and API mapping code using conditional imports. Native filesystem and FFmpeg code are excluded. The UI clearly marks this build as a feasibility preview, and disables native-only login/download actions.
+`flutter build web` compiles the shared adaptive UI with a same-origin service adapter. The Dart service handles Bilibili sessions, parsing, media downloads and FFmpeg. Task updates use WebSocket events; completed files require the owning browser session.
 
-Serve it with `python3 -m http.server 8080 --directory build/web`; do not open `index.html` via `file://`.
+After building, run `dart run bin/web_server.dart` from `flutter_app` and open `http://127.0.0.1:18743`. Install FFmpeg on the service host. A plain static file server is insufficient for login and downloads.
 
-A complete web edition needs a trusted backend for Bilibili requests/session handling and a download/merge job service. Browser CORS enforcement, forbidden `Cookie`/`Referer` headers, inaccessible `Set-Cookie` and native filesystem restrictions cannot be repaired by changing Flutter widgets. A backend should keep cookies server-side, authenticate users, constrain upstream destinations and stream output rather than buffering whole videos. No public proxy, disabled browser security or frontend cookie workaround is included.
+The service currently binds to loopback. It keeps Bilibili cookies in memory and never sends them to the frontend. Browser refresh restores tasks while the service is running; process restart persistence and authenticated remote deployment remain in progress. See [Web service instructions](../docs/web-service.md), including the real-browser fixture test and independent executable build.
 
 ## Migration limits
 
@@ -74,4 +76,4 @@ A complete web edition needs a trusted backend for Bilibili requests/session han
 
 To test real Linux credential storage in a private temporary keyring (requires `gnome-keyring`), run `bash scripts/test_linux_credentials.sh` from the repository root. This wrapper isolates D-Bus and XDG directories from your existing credentials.
 
-See [`docs/flutter-validation.md`](../docs/flutter-validation.md) for measured results and remaining platform validation.
+See [rewrite progress](../docs/rewrite-progress.md) for current measured results and remaining work. [The migration validation report](../docs/flutter-validation.md) records the earlier baseline separately.

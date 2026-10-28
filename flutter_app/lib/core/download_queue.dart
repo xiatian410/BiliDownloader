@@ -40,7 +40,7 @@ class DownloadQueue extends ChangeNotifier {
   }
 
   String _target(DownloadJob j) =>
-      '${j.options.directory}/${safeFilename(j.episode.title)}/${j.episode.number}-${safeFilename(j.episode.name)}'
+      '${j.options.directory}/${j.options.flatDirectory ? '' : j.episode.folderName}/${j.episode.filename(limit: j.options.limitTitle)}'
           .toLowerCase();
 
   Future<void> _run(DownloadJob job) async {
@@ -93,8 +93,22 @@ class DownloadQueue extends ChangeNotifier {
     _schedule();
   }
 
-  void clearCompleted() {
-    jobs.removeWhere((j) => j.state == JobState.completed);
+  Future<void> clearCompleted({Iterable<DownloadJob>? only}) async {
+    final ids = only?.map((j) => j.id).toSet();
+    final targets = jobs
+        .where(
+          (j) =>
+              j.state == JobState.completed &&
+              (ids == null || ids.contains(j.id)),
+        )
+        .toList();
+    if (runner is RemoteJobManagement) {
+      await (runner as RemoteJobManagement).removeCompleted(targets);
+    }
+    jobs.removeWhere(
+      (j) =>
+          j.state == JobState.completed && (ids == null || ids.contains(j.id)),
+    );
     notifyListeners();
   }
 

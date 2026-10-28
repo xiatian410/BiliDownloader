@@ -8,6 +8,56 @@ import 'dart:convert';
 import 'dart:io';
 
 void main() {
+  test(
+    'batch IDs retain source order and report duplicates and unknown inputs',
+    () {
+      final parsed = VideoId.parseMany('av12;BV1gx4y187fX\nep24，av12 invalid');
+      expect(parsed.ids.map((id) => id.label), [
+        'AV12',
+        'BV1gx4y187fX',
+        'EP24',
+      ]);
+      expect(parsed.duplicates, 1);
+      expect(parsed.invalid, ['invalid']);
+      expect(VideoId.parse('BV1gx4y187fX;BV1Bf421B7XS'), isNull);
+    },
+  );
+  test(
+    'truncated titles retain stable media and episode identity in paths',
+    () {
+      final title = 'A' * 90;
+      final a = Episode(
+        cid: 1,
+        number: 1,
+        name: '${title}first',
+        title: title,
+        bvid: 'BV1gx4y187fX',
+      );
+      final b = Episode(
+        cid: 2,
+        number: 1,
+        name: '${title}second',
+        title: title,
+        bvid: 'BV1Bf421B7XS',
+      );
+      expect(a.folderName, isNot(b.folderName));
+      expect(a.filename(), isNot(b.filename()));
+    },
+  );
+  test('available quality excludes advertised formats without streams', () {
+    final media = PlayableMedia.fromJson({
+      'support_formats': [
+        {'quality': 120, 'new_description': '4K'},
+        {'quality': 32, 'new_description': '480P'},
+      ],
+      'dash': {
+        'video': [
+          {'id': 32, 'base_url': 'https://example.test/v'},
+        ],
+      },
+    });
+    expect(media.availableQualities.map((q) => q.label), ['480P']);
+  });
   test('comment payload accepts plain XML and raw DEFLATE', () {
     const xml = '<i><d p="1,1,25,16777215">弹幕</d></i>';
     expect(decodeDanmaku(utf8.encode(xml)), xml);

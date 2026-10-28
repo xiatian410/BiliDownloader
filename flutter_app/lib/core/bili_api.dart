@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import 'models.dart';
 import 'decode.dart';
@@ -11,6 +10,8 @@ const biliHeaders = <String, String>{
   'Referer': 'https://www.bilibili.com/',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36',
 };
+
+const _browser = bool.fromEnvironment('dart.library.js_interop');
 
 class LoginQr {
   const LoginQr(this.url, this.key);
@@ -40,9 +41,11 @@ class BiliApi {
   final Dio dio;
   final String apiOrigin, passportOrigin;
   Map<String, String> cookies = {};
+  bool get authenticated => cookies.isNotEmpty;
+  Future<void> initializeSession() async {}
   (String, String)? _wbi;
 
-  Map<String, String> get headers => kIsWeb
+  Map<String, String> get headers => _browser
       ? {}
       : {
           ...biliHeaders,
@@ -80,7 +83,7 @@ class BiliApi {
         throw AppFailure('httpError', '${e.response!.statusCode}');
       }
       throw AppFailure(
-        kIsWeb ? 'webNetworkError' : 'networkError',
+        _browser ? 'webNetworkError' : 'networkError',
         e.type.name,
       );
     }
@@ -241,7 +244,7 @@ class BiliApi {
   }
 
   Future<LoginQr> generateQr({CancelToken? cancel}) async {
-    if (kIsWeb) throw const AppFailure('webLoginUnsupported');
+    if (_browser) throw const AppFailure('webLoginUnsupported');
     final data = _json(
       (await _request(
         '/x/passport-login/web/qrcode/generate',

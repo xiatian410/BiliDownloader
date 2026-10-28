@@ -15,19 +15,39 @@ class VideoId {
   String get label => '${kind.name.toUpperCase()}$value';
 
   static VideoId? parse(String input) {
-    // Preserve the case of the BV payload; it is case sensitive.
-    final bv = RegExp(
-      r'(?<![A-Za-z0-9])(?:BV|bv)([A-Za-z0-9]{10})(?![A-Za-z0-9])',
-    ).firstMatch(input);
-    if (bv != null) return VideoId(VideoKind.bv, bv[1]!);
-    final matches = RegExp(
-      r'(?<![A-Za-z0-9])(av|md|ep)([1-9][0-9]*)(?![A-Za-z0-9])',
-      caseSensitive: false,
-    ).allMatches(input).toList();
-    if (matches.length != 1) return null;
-    final m = matches.single;
-    return VideoId(VideoKind.values.byName(m[1]!.toLowerCase()), m[2]!);
+    final ids = parseMany(input).ids;
+    return ids.length == 1 ? ids.single : null;
   }
+
+  static VideoInput parseMany(String input) {
+    final ids = <String, VideoId>{};
+    final invalid = <String>[];
+    var duplicates = 0;
+    final pattern = RegExp(
+      r'(?<![A-Za-z0-9])(?:(BV)([A-Za-z0-9]{10})|(av|md|ep)([1-9][0-9]*))(?![A-Za-z0-9])',
+      caseSensitive: false,
+    );
+    for (final token in input.trim().split(RegExp(r'[\s,;，；]+'))) {
+      if (token.isEmpty) continue;
+      final matches = pattern.allMatches(token);
+      if (matches.isEmpty) invalid.add(token);
+      for (final m in matches) {
+        final id = m[1] != null
+            ? VideoId(VideoKind.bv, m[2]!)
+            : VideoId(VideoKind.values.byName(m[3]!.toLowerCase()), m[4]!);
+        if (ids.containsKey(id.label)) duplicates++;
+        ids[id.label] = id;
+      }
+    }
+    return VideoInput(ids.values.toList(), invalid, duplicates);
+  }
+}
+
+class VideoInput {
+  const VideoInput(this.ids, this.invalid, this.duplicates);
+  final List<VideoId> ids;
+  final List<String> invalid;
+  final int duplicates;
 }
 
 class Episode {
@@ -44,6 +64,16 @@ class Episode {
   final String name, title, bvid;
   final int? epId;
   bool get isBangumi => epId != null;
+  String get identity =>
+      epId != null ? 'ep$epId-$cid' : '${bvid.isEmpty ? 'av$aid' : bvid}-$cid';
+  String get folderName =>
+      '${safeFilename(title)} [${safeFilename(bvid.isNotEmpty
+          ? bvid
+          : epId != null
+          ? 'ep$epId'
+          : 'av$aid')}]';
+  String filename({bool limit = true}) =>
+      '${number.toString().padLeft(3, '0')}-${safeFilename(name, limit: limit)} [$cid]';
 }
 
 class VideoInfo {
@@ -102,6 +132,19 @@ class PlayableMedia {
   final MediaStream? flac, dolby;
   final Map<String, String> languages;
   final bool mp4;
+
+  List<Quality> get availableQualities {
+    final ids = video.map((v) => v.quality).toSet().toList()
+      ..sort((a, b) => b.compareTo(a));
+    return ids
+        .map(
+          (id) => qualities.firstWhere(
+            (q) => q.id == id,
+            orElse: () => Quality(id, qualityLabel(id)),
+          ),
+        )
+        .toList();
+  }
 
   factory PlayableMedia.fromJson(Map<String, dynamic> data) {
     if (data['video_info'] is Map) {
@@ -241,13 +284,33 @@ class DownloadOptions {
     this.ultra = false,
     this.dolby = false,
     this.limitTitle = true,
+    this.flatDirectory = false,
+    this.onlyDanmaku = false,
   });
   final String directory, specialAudio, language;
   final int quality, codec;
   final bool onlyAudio, reserveAudio, danmaku, ultra, dolby, limitTitle;
+  final bool flatDirectory, onlyDanmaku;
   int get fnval =>
       16 | 128 | 2048 | (ultra ? 64 | 1024 : 0) | (dolby ? 256 : 0);
 }
+
+String qualityLabel(int id) =>
+    const {
+      6: '240P',
+      16: '360P',
+      32: '480P',
+      64: '720P',
+      74: '720P 60',
+      80: '1080P',
+      112: '1080P+',
+      116: '1080P 60',
+      120: '4K',
+      125: 'HDR',
+      126: 'Dolby Vision',
+      127: '8K',
+    }[id] ??
+    '$id';
 
 Set<int> parseSelection(String text, int count) {
   if (text.trim().isEmpty) return {};

@@ -18,6 +18,7 @@ class DownloadJob {
     : id = '${DateTime.now().microsecondsSinceEpoch}-${_sequence++}';
   static int _sequence = 0;
   final String id;
+  String? remoteId;
   final Episode episode;
   final DownloadOptions options;
   JobState state = JobState.queued;
@@ -46,4 +47,8 @@ class StreamIdentity {
 abstract class DownloadRunner {
   Future<void> run(DownloadJob job, void Function() changed);
   void dispose();
+}
+
+abstract interface class RemoteJobManagement {
+  Future<void> removeCompleted(Iterable<DownloadJob> jobs);
 }

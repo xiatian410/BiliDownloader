@@ -119,4 +119,5 @@ dmypy.json
 
 # Local Flutter build artifacts and test evidence
 /artifacts/
+/flutter_app/web-downloads/
 /scripts/node_modules/

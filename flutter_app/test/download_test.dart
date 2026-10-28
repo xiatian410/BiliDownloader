@@ -23,6 +23,18 @@ class DirectMediaApi extends BiliApi {
   );
 }
 
+class CommentsOnlyApi extends BiliApi {
+  @override
+  Future<PlayableMedia> play(
+    Episode episode,
+    DownloadOptions options, {
+    CancelToken? cancel,
+  }) => throw StateError('Comments must not request media');
+  @override
+  Future<String> danmaku(int cid, {CancelToken? cancel}) async =>
+      '<i><d p="1,1,25,16777215">test comment</d></i>';
+}
+
 void main() {
   late HttpServer server;
   late Directory dir;
@@ -116,6 +128,32 @@ void main() {
       throwsA(isA<AppFailure>().having((e) => e.key, 'key', 'invalidRange')),
     );
     expect(await file.readAsBytes(), partial);
+  });
+  test('comments-only flat output skips media and FFmpeg', () async {
+    final comments = CommentsOnlyApi();
+    final worker = NativeDownloadRunner(
+      comments,
+      merge: (_) => throw StateError('No merge expected'),
+    );
+    addTearDown(() {
+      worker.dispose();
+      comments.close();
+    });
+    final j = DownloadJob(
+      task().episode,
+      DownloadOptions(
+        directory: dir.path,
+        quality: 80,
+        onlyDanmaku: true,
+        flatDirectory: true,
+      ),
+    );
+    await worker.run(j, () {});
+    expect(j.outputs, hasLength(1));
+    final file = File(j.outputs.single);
+    expect(file.parent.path, dir.path);
+    expect(await file.readAsString(), contains('test comment'));
+    expect(ranges, isEmpty);
   });
   test('cancelled jobs do not issue network requests', () async {
     final j = task()..token.cancel();

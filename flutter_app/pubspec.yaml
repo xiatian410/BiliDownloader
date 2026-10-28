@@ -21,6 +21,7 @@ dependencies:
   url_launcher: ^6.3.3
   xml: ^7.1.0
   cupertino_icons: ^2.0.0
+  web_socket_channel: ^3.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
