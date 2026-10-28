@@ -6,6 +6,7 @@ import android.database.MatrixCursor
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
+import android.os.ResultReceiver
 import android.provider.DocumentsContract
 import android.provider.DocumentsProvider
 import java.io.File
@@ -24,6 +25,9 @@ class FixtureGrantActivity : Activity() {
         for (target in listOf("io.github.xiatian410.bili_downloader", "com.android.shell")) {
             grantUriPermission(target, tree, flags)
         }
+        @Suppress("DEPRECATION")
+        val result = intent.getParcelableExtra<ResultReceiver>("grantResult")
+        result?.send(RESULT_OK, null)
         finish()
     }
 }

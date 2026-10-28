@@ -94,7 +94,6 @@ def main():
             for path in [apk / "debug/app-debug.apk", apk / "androidTest/debug/app-debug-androidTest.apk"]:
                 assert path.is_file(), f"Missing {path}"
                 run([*adb, "install", "-t", str(path)], timeout=90)
-            shell("am", "start", "-W", "-n", f"{PACKAGE}.test/{PACKAGE}.FixtureGrantActivity")
             instrument("ExportInstrumentationTest", 4, "instrumentation.log")
 
             # A separate invocation is stopped while the provider holds a partial copy.

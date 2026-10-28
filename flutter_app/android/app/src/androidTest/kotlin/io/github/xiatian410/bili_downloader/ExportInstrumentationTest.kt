@@ -2,8 +2,13 @@ package io.github.xiatian410.bili_downloader
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.ResultReceiver
 import android.provider.DocumentsContract
 import android.system.Os
 import android.system.OsConstants
@@ -34,10 +39,29 @@ object DeviceExportFixture {
     val bytes = ByteArray(131073) { (it % 251).toByte() }
     val report = JSONObject()
     fun source(name: String) = File(context.filesDir, "device-export/$name").apply { parentFile!!.mkdirs() }
-    fun export(name: String, folder: String = ""): String {
-        // Match the production directory picker's persisted grant, including force-stop.
+    private fun ensureGrant() {
+        if (context.contentResolver.persistedUriPermissions.any {
+            it.uri == tree && it.isReadPermission && it.isWritePermission
+        }) return
+        // Instrumentation force-stops the target at startup. Grant afterwards, as
+        // the real picker would, and acknowledge via Binder instead of a delay.
+        val ready = CountDownLatch(1)
+        var accepted = false
+        val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+            override fun onReceiveResult(code: Int, data: Bundle?) {
+                accepted = code == Activity.RESULT_OK
+                ready.countDown()
+            }
+        }
+        context.startActivity(Intent().setClassName("${context.packageName}.test",
+            "io.github.xiatian410.bili_downloader.FixtureGrantActivity")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("grantResult", receiver))
+        check(ready.await(15, TimeUnit.SECONDS) && accepted) { "Fixture grant was not acknowledged" }
         context.contentResolver.takePersistableUriPermission(tree,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+    }
+    fun export(name: String, folder: String = ""): String {
+        ensureGrant()
         val done = CountDownLatch(1)
         var uri: String? = null
         var error: String? = null
@@ -151,6 +175,9 @@ class ExportInstrumentationTest {
                 assertTrue("Flutter did not render", frame.await(40, TimeUnit.SECONDS))
                 if (visible()) ready.countDown()
                 assertTrue("Download controls did not appear", ready.await(20, TimeUnit.SECONDS))
+                // Semantics can arrive before the compositor presents that frame.
+                // Wait for bounded accessibility idleness before taking the screenshot.
+                automation.waitForIdle(500, 5000)
                 val image = requireNotNull(automation.takeScreenshot())
                 val output = File(fixture.context.getExternalFilesDir(null), "test-reports/android-large-font.png")
                 output.parentFile!!.mkdirs()
