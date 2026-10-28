@@ -42,6 +42,7 @@ class RemoteDownloadQueue extends TaskQueue {
   bool _closed = false, _ready = false;
   int _generation = 0;
   int _settingsRevision = 0;
+  String? _workspaceId;
   Future<void> _settingsTail = Future.value();
   final _removed = <String>{};
 
@@ -120,8 +121,8 @@ class RemoteDownloadQueue extends TaskQueue {
   }
 
   @override
-  Future<void> reconnect() {
-    if (_closed || connected) return Future.value();
+  Future<void> reconnect({bool force = false}) {
+    if (_closed || (!force && connected)) return Future.value();
     return _connecting ??= _connect().whenComplete(() => _connecting = null);
   }
 
@@ -134,6 +135,12 @@ class RemoteDownloadQueue extends TaskQueue {
     _channel = null;
     _ready = false;
     connectionError = null;
+    if (_workspaceId != null &&
+        api.workspaceId != null &&
+        _workspaceId != api.workspaceId) {
+      jobs.clear();
+      _removed.clear();
+    }
     _notify();
     final initial = _opening = Completer<void>();
     unawaited(
@@ -150,6 +157,11 @@ class RemoteDownloadQueue extends TaskQueue {
     try {
       await api.initializeSession();
       if (_closed || generation != _generation) return;
+      if (_workspaceId != null && _workspaceId != api.workspaceId) {
+        jobs.clear();
+        _removed.clear();
+      }
+      _workspaceId = api.workspaceId;
       _snapshot(api.restoredJobs);
       maxConcurrent = api.serverConcurrency;
       _settingsRevision = api.serverSettingsRevision;
@@ -189,7 +201,15 @@ class RemoteDownloadQueue extends TaskQueue {
           }
         },
         onError: disconnected,
-        onDone: () => disconnected(const AppFailure('serviceDisconnected')),
+        onDone: () {
+          if (_closed || generation != _generation) return;
+          if (channel.closeCode == 4001) {
+            api.requireServiceAccess();
+            disconnected(const AppFailure('serviceAccessRequired'));
+          } else {
+            disconnected(const AppFailure('serviceDisconnected'));
+          }
+        },
       );
       await Future.wait([
         channel.ready,

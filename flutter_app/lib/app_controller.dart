@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'core/download_job.dart';
 import 'core/models.dart';
 import 'core/settings.dart';
 import 'core/state_store.dart';
+import 'core/service_access.dart';
 import 'platform/platform.dart' as platform;
 
 abstract class AppStore {
@@ -75,17 +77,23 @@ class AppController extends ChangeNotifier {
     required this.queue,
     required this.store,
     this.openHistory,
-  });
+  }) {
+    _accessSubscription = serviceAccess?.accessChanges.listen((_) => _notify());
+  }
   final BiliApi api;
   final TaskQueue queue;
   final AppStore store;
   final Future<StateStore?> Function()? openHistory;
+  StreamSubscription<void>? _accessSubscription;
+  ServiceAccess? get serviceAccess =>
+      api is ServiceAccess ? api as ServiceAccess : null;
   static const storageTimeout = Duration(seconds: 5);
   AppSettings settings = AppSettings();
   bool initializing = true;
   AppFailure? error;
   String? notice;
   bool busy = false;
+  bool connectingService = false;
   int tab = 0, step = 0;
   VideoInfo? info;
   final List<VideoInfo> sources = [];
@@ -101,10 +109,51 @@ class AppController extends ChangeNotifier {
   bool _disposed = false;
   bool get loggedIn => api.authenticated;
 
+  Future<void> connectService(String key, {bool newWorkspace = false}) =>
+      perform(() async {
+        connectingService = true;
+        _notify();
+        final access = serviceAccess!;
+        final previousWorkspace = access.workspaceId;
+        try {
+          await access.unlockService(key, newWorkspace: newWorkspace);
+          if (previousWorkspace != null &&
+              previousWorkspace != access.workspaceId) {
+            info = null;
+            sources.clear();
+            selected.clear();
+            resolveErrors.clear();
+            media = null;
+            tab = 0;
+          }
+          await queue.reconnect(force: true);
+          settings.concurrency = queue.maxConcurrent;
+          await _rememberWorkspace();
+        } finally {
+          connectingService = false;
+        }
+      });
+
+  Future<void> lockService() => perform(() => serviceAccess!.lockService());
+
+  Future<void> _rememberWorkspace() async {
+    final id = serviceAccess?.workspaceId;
+    if (id == null || id == settings.serviceWorkspace) return;
+    settings.serviceWorkspace = id;
+    try {
+      await store.writeSettings(settings.toJson()).timeout(storageTimeout);
+    } catch (_) {
+      throw const AppFailure('settingsError');
+    }
+  }
+
   Future<void> initialize() async {
     try {
       settings = AppSettings.fromJson(
         await store.readSettings().timeout(storageTimeout),
+      );
+      serviceAccess?.rememberWorkspace(
+        settings.serviceWorkspace.isEmpty ? null : settings.serviceWorkspace,
       );
       if (!kIsWeb && settings.directory.isEmpty) {
         settings.directory = await platform.defaultDirectory().timeout(
@@ -136,6 +185,7 @@ class AppController extends ChangeNotifier {
         await queue.reconnect();
         settings.concurrency = queue.maxConcurrent;
         if (queue.recoveredHistory) notice = 'historyRecovered';
+        await _rememberWorkspace();
       } else {
         await api.initializeSession();
       }
@@ -393,6 +443,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_accessSubscription?.cancel());
     _request?.cancel();
     api.close();
     queue.dispose();

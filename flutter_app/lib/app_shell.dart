@@ -8,14 +8,53 @@ import 'ui/downloads_page.dart';
 import 'ui/new_download_page.dart';
 import 'ui/settings_page.dart';
 import 'ui/widgets.dart';
+import 'ui/service_access_page.dart';
 
-class BiliDownloaderApp extends StatelessWidget {
+class BiliDownloaderApp extends StatefulWidget {
   const BiliDownloaderApp({super.key, required this.controller});
   final AppController controller;
+  @override
+  State<BiliDownloaderApp> createState() => _BiliDownloaderAppState();
+}
+
+class _BiliDownloaderAppState extends State<BiliDownloaderApp> {
+  final _navigator = GlobalKey<NavigatorState>();
+  AppController get controller => widget.controller;
+  bool _locked = false;
+  @override
+  void initState() {
+    super.initState();
+    controller.addListener(_accessChanged);
+  }
+
+  @override
+  void didUpdateWidget(BiliDownloaderApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != controller) {
+      oldWidget.controller.removeListener(_accessChanged);
+      controller.addListener(_accessChanged);
+    }
+  }
+
+  void _accessChanged() {
+    final locked = controller.serviceAccess?.serviceLocked == true;
+    if (locked && !_locked) {
+      _navigator.currentState?.popUntil((route) => route.isFirst);
+    }
+    _locked = locked;
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_accessChanged);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) => MaterialApp(
+      navigatorKey: _navigator,
       title: 'BiliDownloader',
       debugShowCheckedModeBanner: false,
       locale: Locale(controller.settings.locale),
@@ -41,13 +80,40 @@ class BiliDownloaderApp extends StatelessWidget {
                 ),
               ),
             )
-          : _Workspace(controller: controller),
+          : workspace(),
     ),
   );
+
+  Widget workspace() {
+    if (controller.serviceAccess == null) {
+      return _Workspace(controller: controller);
+    }
+    final locked =
+        controller.serviceAccess!.serviceLocked || controller.connectingService;
+    // Preserve unfinished input across authorization expiry without exposing
+    // the hidden workspace to focus, rendering or accessibility traversal.
+    return IndexedStack(
+      sizing: StackFit.expand,
+      index: locked ? 1 : 0,
+      children: [
+        ExcludeFocus(
+          excluding: locked,
+          child: _Workspace(
+            key: ValueKey(controller.serviceAccess!.workspaceId),
+            controller: controller,
+          ),
+        ),
+        ExcludeFocus(
+          excluding: !locked,
+          child: ServiceAccessPage(controller: controller),
+        ),
+      ],
+    );
+  }
 }
 
 class _Workspace extends StatelessWidget {
-  const _Workspace({required this.controller});
+  const _Workspace({super.key, required this.controller});
   final AppController controller;
   static const icons = [
     Icons.add_circle_outline,

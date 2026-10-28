@@ -200,9 +200,29 @@ class Strings {
       'Connection lost. Background status is unknown; reconnect to synchronize tasks.',
     ],
     'serviceSessionExpired': [
-      '服务会话已失效，请刷新页面重新连接。',
-      'Service session expired. Reload to reconnect.',
+      '服务会话已失效，无法访问原工作区。',
+      'The service session is no longer valid for the original workspace.',
     ],
+    'serviceAccess': ['服务访问', 'Service access'],
+    'serviceAccessRequired': ['请重新连接下载服务', 'Reconnect to the download service'],
+    'serviceAccessIntro': [
+      '输入管理员提供的访问密钥，连接下载服务。授权过期或锁定后，后台任务仍会继续。',
+      'Enter the access key supplied by your administrator. Background tasks continue after access expires or this page is locked.',
+    ],
+    'serviceKey': ['访问密钥', 'Access key'],
+    'serviceKeyRequired': ['请输入访问密钥', 'Enter the access key'],
+    'invalidServiceKey': ['访问密钥不正确', 'The access key is incorrect'],
+    'connectService': ['连接服务', 'Connect to service'],
+    'lockService': ['锁定服务访问', 'Lock service access'],
+    'lockServiceHint': [
+      '锁定当前浏览器的服务访问，后台任务继续执行。再次输入访问密钥可恢复。',
+      'Lock service access for this browser while background tasks continue. Enter the access key again to return.',
+    ],
+    'serviceWorkspaceLost': [
+      '浏览器会话已失效。原任务与文件仍保留在服务端，但无法凭访问密钥找回其归属。你可以重新连接，或明确创建新的工作区。',
+      'The browser session is no longer valid. Existing tasks and files remain on the server, but the access key cannot recover their ownership. Reconnect or explicitly create a new workspace.',
+    ],
+    'newServiceWorkspace': ['创建新的工作区', 'Create a new workspace'],
     'serviceBusy': [
       '服务已达到任务或会话上限，请先处理已有任务。',
       'The service has reached its task or session limit.',

@@ -19,13 +19,43 @@ dart run bin/web_server.dart
 
 `bash scripts/build_flutter.sh web` 会在 Linux 上打包静态界面和完整的本机服务包。服务包解压后执行 `./run.sh`；脚本会从包内读取前端，并默认把下载文件放在包目录的 `downloads/`。仅静态界面包需要另行配套服务。
 
-当前服务绑定本机回环地址；远程部署与访问认证仍在实现范围内，当前不能作为公网多用户服务发布。下载目录必须位于静态网页目录之外，防止静态文件服务暴露任务记录和成品。
+服务始终绑定本机回环地址。远程访问使用下方的访问密钥和 HTTPS 反向代理配置。下载目录必须位于静态网页目录之外，防止静态文件服务暴露任务记录和成品。
 
 队列与任务选项现在保存到下载根目录的 `.state/`，使用两份带校验的记录及独占写入锁。刷新页面或重启服务后，同一浏览器会话可恢复任务和成品访问；运行中断的任务恢复为暂停，点击继续后校验资源身份与已生成文件。若一份记录损坏，会从另一份有效记录恢复并提示核对；两份都损坏时保留原件、停止写入，不自动重置历史。
 
 加入队列会一次提交整批任务，全部校验与记录保存成功后才进入服务端调度。关闭浏览器不会停止运行中或排队中的任务；服务进程必须继续运行。每个页面只使用一条事件连接同步整个队列，包括其他标签页创建、暂停或清除的任务。并发设置也保存到服务端；修改主题等其他设置不会覆盖另一个页面修改的并发数。
 
 会话 Cookie 的有效期为 30 天，打开应用时续期。服务端仅保存该随机令牌的哈希，不保存原始令牌、B站 Cookie 或签名媒体 URL。B站登录状态在服务重启后需要重新建立。清除浏览器 Cookie 会失去原会话的任务访问权，不会自动删除服务器上的文件。
+
+## HTTPS 远程访问
+
+解压独立服务包后，先生成随机访问密钥。以下路径和域名都是示例，目录需要事先存在：
+
+```bash
+./run.sh --generate-access-key /srv/bili-private/access.key
+export BILI_ACCESS_KEY_FILE=/srv/bili-private/access.key
+export BILI_PUBLIC_ORIGIN=https://downloads.example.com
+export BILI_DOWNLOAD_ROOT=/srv/bili-private/downloads
+./run.sh
+```
+
+生成器不会打印密钥或覆盖已有文件；POSIX 上先设置 0600 权限再写入内容。密钥文件必须位于静态网页目录之外，启动时检查权限和格式。Windows 部署时由管理员通过 NTFS 权限保护该文件。运行在同一主机上的反向代理负责 TLS，保留外部 Host、Origin 和 WebSocket Upgrade；服务不信任调用方提供的转发头。
+
+对应的 Caddy 配置示例：
+
+```caddyfile
+downloads.example.com {
+    reverse_proxy 127.0.0.1:18743
+}
+```
+
+Caddy 的反向代理支持 WebSocket，并默认保留转发到 HTTP 上游的 Host；配置依据见 [Caddy 官方文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。域名应解析到部署主机，HTTPS 证书需要正常有效。当前验证使用本地 HTTPS 代理和临时测试证书，未部署真实域名或证书。`BILI_PUBLIC_ORIGIN` 只接受 HTTPS 根来源，包含子路径的部署尚未支持；配置远程来源却未提供密钥时，服务拒绝启动。只设置密钥文件而不设置远程来源，可给本机模式增加认证。
+
+浏览器输入管理员提供的密钥后，获得本浏览器的工作区访问权。授权有效期为 12 小时，所有任务、文件、封面与事件接口都检查授权。HTTPS 模式使用 `__Host-` Cookie，并设置 Secure、HttpOnly、SameSite=Strict；属性说明见 [MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)。每次成功授权轮换浏览器令牌，旧令牌失效，工作区保持不变。
+
+设置中的“锁定服务访问”关闭当前浏览器的访问权限，后台任务继续执行；重新输入密钥可返回原工作区。授权过期时，事件连接由一个有明确期限的计时器关闭，不增加轮询或自动重试。输入框内容在锁定与重新授权期间保留，隐藏工作区不参与键盘焦点或无障碍导航。读取损坏记录的旧备份后必须重新授权，避免恢复旧备份中已撤销的权限。
+
+密钥不写入浏览器持久存储。浏览器仅保存不具备授权能力的工作区标记，用于发现 Cookie 被清除的情况；此时页面要求明确创建新工作区，原任务与文件继续留在服务端。不同浏览器各自持有工作区，跨设备共享历史尚未提供。更换管理员密钥时生成新文件，调整 `BILI_ACCESS_KEY_FILE` 后重启服务；所有浏览器需要重新授权，未完成任务按服务重启规则保持暂停。
 
 ## 已有约束
 
@@ -46,11 +76,14 @@ flutter test
 # 从仓库根目录执行，PATH 中应有 dart、ffmpeg、ffprobe：
 npm --prefix scripts ci --ignore-scripts
 MANAGE_FIXTURE=1 node scripts/test_flutter_web_flow.cjs
+node scripts/test_flutter_web_access.cjs
 ```
 
 测试服务只用于本地样本，生产入口不会加载。脚本启动测试服务，通过真实 FFmpeg 生成音视频，Chrome 操作解析、画质选择、下载、取回文件，随后用 ffprobe 和 FFmpeg 验证成品轨道与解码结果。还检查部分解析失败、刷新恢复、WebService 实例重启、扫码接口样本、仅音频/弹幕、按剩余字节恢复、失败重试、WebSocket 中断，以及创建响应丢失后保持单个任务。扫码响应由本地样本提供，不代表真实账号登录。截图与结果位于 `artifacts/rewrite/`。
 
 批量场景从界面提交 8 项任务，并发设为 1。在 1 项运行、7 项排队时关闭整个 Chrome 进程，再通过仅接收事件的观察页确认服务端完成全部任务；随后重新打开 Flutter 页面取回最后一项成品并解码。测试不会把会话 Cookie 写入日志或结果文件。服务端测试另外覆盖整批校验失败、记录写入失败不留下部分任务，以及 8 项任务在服务重启后保持原 ID、暂停状态与并发设置。
+
+认证浏览器脚本通过临时 HTTPS 代理验证手机登录页、错误密钥、Secure/HttpOnly Cookie、真实样本下载解码、跨工作区拒绝访问、锁定/过期后恢复、服务重启、未提交输入保留，以及清除 Cookie 后明确创建新工作区。访问密钥和 Cookie 只保留在测试进程内存中；临时证书在结束时删除。截图和结果保留在 `artifacts/access/`。测试对临时证书的信任覆盖只存在于 Playwright 测试环境，生产客户端不关闭证书验证。
 
 不设置 `MANAGE_FIXTURE` 时，需自行启动 `dart run test/fixtures/browser_service.dart`；脚本跳过服务重启、主动暂停分段媒体和断线注入。GitHub Actions 的 Web 构建使用完整的受管样本模式。浏览器自动化在输入框获得焦点后等待两个渲染帧，让 Flutter 完成无障碍编辑节点切换，没有为生产交互增加延时。
 

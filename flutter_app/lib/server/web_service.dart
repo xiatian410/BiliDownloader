@@ -14,9 +14,12 @@ import '../core/models.dart';
 import '../core/wire.dart';
 import '../core/file_state_store.dart';
 import '../core/job_snapshot.dart';
+import 'access_policy.dart';
 
 class _Session {
-  _Session(this.id, this.api, this.store) : runner = NativeDownloadRunner(api);
+  _Session(this.id, this.api, this.store)
+    : tokenHash = id,
+      runner = NativeDownloadRunner(api);
   final String id;
   final BiliApi api;
   final NativeDownloadRunner runner;
@@ -32,20 +35,26 @@ class _Session {
   DateTime used = DateTime.now();
   int concurrency = 4;
   int settingsRevision = 0;
+  String tokenHash;
+  String? accessFingerprint;
+  DateTime? accessUntil;
+  Timer? accessTimer;
 }
 
-/// Same-origin local web host. Remote exposure requires a separate authenticated gateway.
+/// Same-origin host bound to loopback. Remote mode requires an HTTPS proxy.
 class WebService {
   WebService({
     required String webRoot,
     required String downloadRoot,
     BiliApi Function()? apiFactory,
+    this.access,
   }) : apiFactory = apiFactory ?? BiliApi.new,
        webRoot = p.normalize(p.absolute(webRoot)),
        downloadRoot = p.normalize(p.absolute(downloadRoot));
   final String webRoot, downloadRoot;
   late final String _realWebRoot, _realDownloadRoot;
   final BiliApi Function() apiFactory;
+  final AccessPolicy? access;
   final _sessions = <String, _Session>{};
   final _random = Random.secure();
   HttpServer? _server;
@@ -87,6 +96,21 @@ class WebService {
           throw const AppFailure('historyCorrupt');
         }
         session.recovered = snapshot.recovered;
+        session.tokenHash = snapshot.data['tokenHash'] as String? ?? id;
+        session.accessFingerprint =
+            snapshot.data['accessFingerprint'] as String?;
+        session.accessUntil = DateTime.tryParse(
+          snapshot.data['accessUntil'] as String? ?? '',
+        );
+        // A fallback record can predate a lock or revocation. Require the key
+        // again instead of restoring the fallback's previous authorization.
+        if (snapshot.recovered) {
+          session.accessFingerprint = null;
+          session.accessUntil = null;
+        }
+        if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(session.tokenHash)) {
+          throw const AppFailure('historyCorrupt');
+        }
         session.concurrency = snapshot.data['concurrency'] as int? ?? 4;
         session.settingsRevision =
             snapshot.data['settingsRevision'] as int? ?? 0;
@@ -153,6 +177,9 @@ class WebService {
         'used': s.used.toIso8601String(),
         'concurrency': s.concurrency,
         'settingsRevision': s.settingsRevision,
+        'tokenHash': s.tokenHash,
+        'accessFingerprint': s.accessFingerprint,
+        'accessUntil': s.accessUntil?.toIso8601String(),
         'jobs': (jobs ?? s.jobs.values).map(jobSnapshot).toList(),
       });
       s.storageError = null;
@@ -185,15 +212,108 @@ class WebService {
     return Map<String, dynamic>.from(data);
   }
 
+  String get _cookieName =>
+      access?.secure == true ? '__Host-bili_session' : 'bili_session';
+  String? _token(HttpRequest r) {
+    final values = r.cookies.where((c) => c.name == _cookieName).toList();
+    return values.length == 1
+        ? values.single.value
+        : values.isEmpty
+        ? null
+        : '';
+  }
+
   _Session? _session(HttpRequest r) {
-    for (final c in r.cookies) {
-      if (c.name == 'bili_session') {
-        final session = _sessions[_sessionKey(c.value)];
-        if (session != null) session.used = DateTime.now();
+    final token = _token(r);
+    if (token == null || !RegExp(r'^[a-f0-9]{64}$').hasMatch(token)) {
+      return null;
+    }
+    final hash = _sessionKey(token);
+    for (final session in _sessions.values) {
+      if (session.tokenHash == hash) {
+        session.used = DateTime.now();
         return session;
       }
     }
     return null;
+  }
+
+  bool _authorized(_Session s) =>
+      access == null ||
+      (s.accessFingerprint == access!.fingerprint &&
+          s.accessUntil != null &&
+          access!.now().isBefore(s.accessUntil!));
+
+  void _closeAccessSockets(_Session s) {
+    s.accessTimer?.cancel();
+    s.accessTimer = null;
+    for (final socket in s.sockets.toList()) {
+      unawaited(socket.close(4001, 'serviceAccessRequired'));
+    }
+    s.sockets.clear();
+  }
+
+  void _watchAccessExpiry(_Session s) {
+    s.accessTimer?.cancel();
+    if (access == null) return;
+    // One bounded expiry timer per active workspace, never a polling loop.
+    final remaining = s.accessUntil!.difference(access!.now());
+    s.accessTimer = Timer(
+      remaining.isNegative ? Duration.zero : remaining,
+      () => _closeAccessSockets(s),
+    );
+  }
+
+  void _setCookie(HttpRequest r, String token) => r.response.headers.add(
+    'set-cookie',
+    '$_cookieName=$token; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000${access?.secure == true ? '; Secure' : ''}',
+  );
+
+  Map<String, dynamic> _sessionData(_Session s) => {
+    'accessRequired': access != null,
+    'accessGranted': true,
+    'workspace': s.id,
+    'authenticated': s.api.cookies.isNotEmpty,
+    'jobs': s.jobs.values.map(_job).toList(),
+    'recovered': s.recovered,
+    'concurrency': s.concurrency,
+    'settingsRevision': s.settingsRevision,
+  };
+
+  Future<_Session> _newSession(String token) async {
+    for (final old in _sessions.values.toList()) {
+      if (DateTime.now().difference(old.used) > const Duration(days: 30) &&
+          old.jobs.isEmpty &&
+          old.sockets.isEmpty) {
+        _sessions.remove(old.id);
+        old.accessTimer?.cancel();
+        old.runner.dispose();
+        old.api.close();
+        await old.store.close();
+      }
+    }
+    if (_sessions.length >= 32) throw const AppFailure('serviceBusy');
+    final id = _sessionKey(token);
+    final store = FileStateStore(p.join(downloadRoot, '.state', id));
+    final s = _Session(id, apiFactory(), store);
+    _sessions[id] = s;
+    try {
+      await store.read();
+    } catch (_) {
+      _sessions.remove(id);
+      s.api.close();
+      s.runner.dispose();
+      await store.close();
+      rethrow;
+    }
+    return s;
+  }
+
+  Future<void> _discardNewSession(_Session s) async {
+    _sessions.remove(s.id);
+    s.api.close();
+    s.runner.dispose();
+    await s.store.close();
   }
 
   Map<String, dynamic> _job(DownloadJob j) => {
@@ -223,6 +343,10 @@ class WebService {
   }
 
   void _broadcast(_Session s, Map<String, dynamic> event) {
+    if (!_authorized(s)) {
+      _closeAccessSockets(s);
+      return;
+    }
     final data = jsonEncode(event);
     for (final socket in s.sockets.toList()) {
       if (socket.readyState == WebSocket.open) socket.add(data);
@@ -359,10 +483,13 @@ class WebService {
     var upgraded = false;
     try {
       final host = r.headers.value('host');
-      final expected = host == 'localhost:$port'
-          ? 'http://localhost:$port'
-          : origin;
-      if (host != '127.0.0.1:$port' && host != 'localhost:$port') {
+      final expected =
+          access?.publicOrigin?.origin ??
+          (host == 'localhost:$port' ? 'http://localhost:$port' : origin);
+      final hostAllowed = access?.publicOrigin != null
+          ? host == access!.publicOrigin!.authority
+          : host == '127.0.0.1:$port' || host == 'localhost:$port';
+      if (!hostAllowed) {
         _json(r, {'error': 'forbidden'}, status: 403);
         return;
       }
@@ -373,6 +500,7 @@ class WebService {
       }
       r.response.headers.set('X-Content-Type-Options', 'nosniff');
       r.response.headers.set('Referrer-Policy', 'no-referrer');
+      r.response.headers.set('X-Frame-Options', 'DENY');
       final route = r.uri.path;
       if (!route.startsWith('/api/')) {
         await _static(r);
@@ -383,68 +511,119 @@ class WebService {
         _json(r, {'error': 'forbidden'}, status: 403);
         return;
       }
-      if (route == '/api/session' && r.method == 'POST') {
-        var s = _session(r);
-        if (s == null) {
-          // Expire idle sessions only on incoming work, with no background polling.
-          for (final old in _sessions.values.toList()) {
-            if (DateTime.now().difference(old.used) >
-                    const Duration(days: 30) &&
-                old.jobs.isEmpty &&
-                old.sockets.isEmpty) {
-              _sessions.remove(old.id);
-              old.runner.dispose();
-              old.api.close();
-              await old.store.close();
-              for (final socket in old.sockets) {
-                unawaited(socket.close());
-              }
-            }
-          }
-          if (_sessions.length >= 32) {
-            _json(r, {'error': 'serviceBusy'}, status: 429);
-            return;
-          }
-          final token = _id();
-          final id = _sessionKey(token);
-          final store = FileStateStore(p.join(downloadRoot, '.state', id));
-          s = _Session(id, apiFactory(), store);
-          _sessions[s.id] = s;
-          try {
-            await store.read();
-          } catch (_) {
-            _sessions.remove(id);
-            s.api.close();
-            s.runner.dispose();
-            await store.close();
-            rethrow;
-          }
-          r.response.headers.add(
-            'set-cookie',
-            'bili_session=$token; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000',
-          );
-        } else {
-          final token = r.cookies
-              .firstWhere((c) => c.name == 'bili_session')
-              .value;
-          r.response.headers.add(
-            'set-cookie',
-            'bili_session=$token; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000',
-          );
+      if (route == '/api/access/unlock' && r.method == 'POST') {
+        final body = await _body(r);
+        if (access != null && !access!.accepts(body['key'])) {
+          _json(r, {'error': 'invalidServiceKey'}, status: 403);
+          return;
         }
-        await _persist(s);
-        _json(r, {
-          'authenticated': s.api.cookies.isNotEmpty,
-          'jobs': s.jobs.values.map(_job).toList(),
-          'recovered': s.recovered,
-          'concurrency': s.concurrency,
-          'settingsRevision': s.settingsRevision,
-        });
+        var s = _session(r);
+        if (s == null && _token(r) != null && body['newWorkspace'] != true) {
+          _json(r, {
+            'error': 'serviceSessionExpired',
+            'accessRequired': access != null,
+          }, status: 401);
+          return;
+        }
+        final token = _id();
+        final isNew = s == null;
+        s ??= await _newSession(token);
+        final session = s;
+        final originalHash = session.tokenHash;
+        try {
+          await _transaction(session, () async {
+            if (session.tokenHash != originalHash) {
+              throw const AppFailure('serviceAccessRequired');
+            }
+            final previous = (
+              session.tokenHash,
+              session.accessFingerprint,
+              session.accessUntil,
+            );
+            session.tokenHash = _sessionKey(token);
+            session.accessFingerprint = access?.fingerprint;
+            session.accessUntil = access == null
+                ? null
+                : access!.now().toUtc().add(access!.lifetime);
+            try {
+              await _writeSession(session);
+            } catch (_) {
+              session.tokenHash = previous.$1;
+              session.accessFingerprint = previous.$2;
+              session.accessUntil = previous.$3;
+              rethrow;
+            }
+          });
+        } catch (_) {
+          if (isNew) await _discardNewSession(session);
+          rethrow;
+        }
+        _closeAccessSockets(s);
+        _setCookie(r, token);
+        _json(r, _sessionData(s));
+        return;
+      }
+      if (route == '/api/session' && r.method == 'POST') {
+        final body = await _body(r);
+        var s = _session(r);
+        if (s == null &&
+            (_token(r) != null || body['existingWorkspace'] == true)) {
+          _json(r, {
+            'error': 'serviceSessionExpired',
+            'accessRequired': access != null,
+          }, status: 401);
+          return;
+        }
+        if (access != null && (s == null || !_authorized(s))) {
+          if (s != null) _closeAccessSockets(s);
+          _json(r, {'accessRequired': true, 'accessGranted': false});
+          return;
+        }
+        final token = _token(r) ?? _id();
+        final isNew = s == null;
+        s ??= await _newSession(token);
+        try {
+          await _persist(s);
+        } catch (_) {
+          if (isNew) await _discardNewSession(s);
+          rethrow;
+        }
+        // A concurrent unlock may have rotated the cookie while saving.
+        if (s.tokenHash == _sessionKey(token)) _setCookie(r, token);
+        _json(r, _sessionData(s));
         return;
       }
       final s = _session(r);
       if (s == null) {
-        _json(r, {'error': 'serviceSessionExpired'}, status: 401);
+        _json(r, {
+          'error': 'serviceSessionExpired',
+          'accessRequired': access != null,
+        }, status: 401);
+        return;
+      }
+      if (!_authorized(s)) {
+        _closeAccessSockets(s);
+        _json(r, {
+          'error': 'serviceAccessRequired',
+          'accessRequired': true,
+        }, status: 401);
+        return;
+      }
+      if (route == '/api/access/lock' && r.method == 'POST') {
+        await _transaction(s, () async {
+          final previous = (s.accessFingerprint, s.accessUntil);
+          s.accessFingerprint = null;
+          s.accessUntil = null;
+          try {
+            await _writeSession(s);
+          } catch (_) {
+            s.accessFingerprint = previous.$1;
+            s.accessUntil = previous.$2;
+            rethrow;
+          }
+        });
+        _closeAccessSockets(s);
+        _json(r, {'ok': true});
         return;
       }
       if (route == '/api/events' && WebSocketTransformer.isUpgradeRequest(r)) {
@@ -455,6 +634,7 @@ class WebService {
         final socket = await WebSocketTransformer.upgrade(r);
         upgraded = true;
         s.sockets.add(socket);
+        _watchAccessExpiry(s);
         socket.listen(
           (_) {},
           onDone: () => s.sockets.remove(socket),
@@ -681,7 +861,11 @@ class WebService {
           _json(r, {'error': 'notFound'}, status: 404);
       }
     } on AppFailure catch (e) {
-      _json(r, {'error': e.key, 'detail': e.detail}, status: 422);
+      _json(r, {
+        'error': e.key,
+        'detail': e.detail,
+        if (e.key == 'serviceAccessRequired') 'accessRequired': access != null,
+      }, status: e.key == 'serviceAccessRequired' ? 401 : 422);
     } on FileSystemException {
       _json(r, {'error': 'saveFailed'}, status: 500);
     } catch (_) {
@@ -733,6 +917,7 @@ class WebService {
   Future<void> close() async {
     _closed = true;
     for (final s in _sessions.values) {
+      s.accessTimer?.cancel();
       for (final j in s.jobs.values) {
         j.token.cancel('shutdown');
       }

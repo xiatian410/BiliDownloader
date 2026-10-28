@@ -66,7 +66,7 @@ jobs:
         if: matrix.target == 'windows'
         working-directory: flutter_app
         run: |
-          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/media_merge_test.dart test/remote_runner_test.dart
+          flutter test test/persistence_test.dart test/download_test.dart test/web_service_test.dart test/web_access_test.dart test/media_merge_test.dart test/remote_runner_test.dart
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test integration_test/native_smoke_test.dart -d windows
       - name: Build Linux, Android or Web
@@ -79,7 +79,9 @@ jobs:
         run: ./scripts/build_flutter.ps1
       - name: Test Web download and recovery in Chrome
         if: matrix.target == 'web'
-        run: MANAGE_FIXTURE=1 node scripts/test_flutter_web_flow.cjs
+        run: |
+          MANAGE_FIXTURE=1 node scripts/test_flutter_web_flow.cjs
+          node scripts/test_flutter_web_access.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BiliDownloader-${{ matrix.target }}

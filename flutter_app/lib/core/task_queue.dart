@@ -17,7 +17,7 @@ abstract class TaskQueue extends ChangeNotifier {
   bool get recoveredHistory => false;
   Future<void> restore(StateStore store) =>
       Future.error(UnsupportedError('This queue has no local history store'));
-  Future<void> reconnect() async {}
+  Future<void> reconnect({bool force = false}) async {}
   Future<void> add(Iterable<DownloadJob> additions);
   Future<void> setConcurrency(int value);
   void pause(DownloadJob job);

@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:bili_downloader/core/bili_api.dart';
 import 'package:bili_downloader/core/models.dart';
 import 'package:bili_downloader/server/web_service.dart';
+import 'package:bili_downloader/server/access_policy.dart';
 
 class BrowserFixtureApi extends BiliApi {
   BrowserFixtureApi(this.origin);
@@ -179,10 +180,21 @@ Future<void> main() async {
       await r.response.close().catchError((_) {});
     }
   });
+  var clockOffset = Duration.zero;
+  final accessKey = Platform.environment['BILI_FIXTURE_ACCESS_KEY'];
   WebService createService() => WebService(
     webRoot: 'build/web',
     downloadRoot: '${directory.path}/downloads',
     apiFactory: () => BrowserFixtureApi('http://127.0.0.1:${media.port}'),
+    access: accessKey == null
+        ? null
+        : AccessPolicy(
+            key: accessKey,
+            publicOrigin: Uri.parse(
+              Platform.environment['BILI_FIXTURE_PUBLIC_ORIGIN']!,
+            ),
+            now: () => DateTime.now().add(clockOffset),
+          ),
   );
   var service = createService();
   await service.start(port: 18744);
@@ -208,6 +220,9 @@ Future<void> main() async {
         if (!gate.isCompleted) gate.complete();
       }
       stdout.writeln('Fixture released:');
+    } else if (command == 'expire') {
+      clockOffset += const Duration(hours: 13);
+      stdout.writeln('Fixture expired:');
     }
   }
 }

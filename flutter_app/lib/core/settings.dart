@@ -13,6 +13,8 @@ class AppSettings {
   bool flatDirectory = false;
   bool onlyDanmaku = false;
   String theme = 'system';
+  // A non-secret hint detects cleared ownership cookies; it grants no access.
+  String serviceWorkspace = '';
 
   Map<String, dynamic> toJson() => {
     'directory': directory,
@@ -29,9 +31,14 @@ class AppSettings {
     'flatDirectory': flatDirectory,
     'onlyDanmaku': onlyDanmaku,
     'theme': theme,
+    'serviceWorkspace': serviceWorkspace,
   };
   factory AppSettings.fromJson(Map<String, dynamic> data) {
     final s = AppSettings();
+    final workspace = data['serviceWorkspace'];
+    if (workspace is String && RegExp(r'^[a-f0-9]{64}$').hasMatch(workspace)) {
+      s.serviceWorkspace = workspace;
+    }
     s.directory = data['directory'] as String? ?? '';
     s.locale = data['locale'] == 'en' ? 'en' : 'zh';
     final concurrency = data['concurrency'];

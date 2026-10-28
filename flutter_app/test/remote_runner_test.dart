@@ -30,6 +30,8 @@ class TestSocket implements WebSocketChannel {
   @override
   Future<void> get ready async {}
   @override
+  int? get closeCode => null;
+  @override
   WebSocketSink get sink => TestSink(incoming);
   void emit(Map data) => incoming.add(jsonEncode(data));
   @override

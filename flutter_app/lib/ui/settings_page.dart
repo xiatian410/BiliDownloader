@@ -49,6 +49,28 @@ class SettingsPage extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       children: [
         PageHeading(s('settings'), s('settingsSubtitle')),
+        if (c.serviceAccess?.requiresServiceKey == true) ...[
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s('serviceAccess'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                Text(s('lockServiceHint')),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: c.busy ? null : c.lockService,
+                  icon: const Icon(Icons.lock_outline),
+                  label: Text(s('lockService')),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

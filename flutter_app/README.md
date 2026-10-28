@@ -68,7 +68,7 @@ Web batches are persisted together before entering the service queue. Closing th
 
 After building, run `dart run bin/web_server.dart` from `flutter_app` and open `http://127.0.0.1:18743`. Install FFmpeg on the service host. A plain static file server is insufficient for login and downloads.
 
-The service currently binds to loopback. It keeps Bilibili cookies in memory and never sends them to the frontend. The same browser session restores tasks across refresh and service restart; Bilibili sign-in must be repeated after service restart. Authenticated remote deployment remains in progress. See [Web service instructions](../docs/web-service.md), including the real-browser fixture test and independent executable build.
+The service binds to loopback. Remote access uses an explicitly configured HTTPS origin, a local reverse proxy and an operator-generated access key. Authorization expires after 12 hours; locking or expiration leaves background tasks running. Reauthorization restores the same browser workspace, while missing ownership cookies require explicit creation of a new workspace. Bilibili cookies remain in service memory; Bilibili sign-in must be repeated after service restart. See [Web service instructions](../docs/web-service.md) for configuration, local HTTPS browser validation and independent executable builds. Production DNS/TLS deployment and real Bilibili account validation remain unverified.
 
 ## Migration limits
 

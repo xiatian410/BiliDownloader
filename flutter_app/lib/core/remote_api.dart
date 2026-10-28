@@ -1,10 +1,13 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 
 import 'bili_api.dart';
 import 'models.dart';
 import 'wire.dart';
+import 'service_access.dart';
 
-class RemoteBiliApi extends BiliApi {
+class RemoteBiliApi extends BiliApi implements ServiceAccess {
   RemoteBiliApi({Dio? client, Uri? origin})
     : origin = origin ?? Uri.base,
       super(dio: client);
@@ -16,6 +19,28 @@ class RemoteBiliApi extends BiliApi {
   int serverConcurrency = 4;
   int serverSettingsRevision = 0;
   bool recoveredHistory = false;
+  final _accessChanges = StreamController<void>.broadcast(sync: true);
+  @override
+  Stream<void> get accessChanges => _accessChanges.stream;
+  @override
+  bool serviceLocked = false;
+  @override
+  bool requiresServiceKey = false;
+  @override
+  bool serviceSessionLost = false;
+  @override
+  String? workspaceId;
+  @override
+  void rememberWorkspace(String? id) => workspaceId = id;
+
+  void requireServiceAccess({bool lost = false}) {
+    if (_accessChanges.isClosed) return;
+    serviceLocked = true;
+    serviceSessionLost = lost;
+    _authenticated = false;
+    if (!_accessChanges.isClosed) _accessChanges.add(null);
+  }
+
   Future<Map<String, dynamic>> call(
     String path, [
     Map<String, dynamic> body = const {},
@@ -34,6 +59,10 @@ class RemoteBiliApi extends BiliApi {
       if (CancelToken.isCancel(e)) rethrow;
       final data = e.response?.data;
       if (data is Map && data['error'] is String) {
+        if (e.response?.statusCode == 401) {
+          requiresServiceKey = data['accessRequired'] == true;
+          requireServiceAccess(lost: data['error'] == 'serviceSessionExpired');
+        }
         throw AppFailure(
           data['error'] as String,
           data['detail'] as String? ?? '',
@@ -45,12 +74,48 @@ class RemoteBiliApi extends BiliApi {
 
   @override
   Future<void> initializeSession() async {
-    final data = await call('/api/session');
+    final data = await call('/api/session', {
+      'existingWorkspace': workspaceId != null,
+    });
+    _acceptSession(data);
+  }
+
+  void _acceptSession(Map<String, dynamic> data) {
+    requiresServiceKey = data['accessRequired'] == true;
+    if (data['accessGranted'] == false) {
+      requireServiceAccess();
+      throw const AppFailure('serviceAccessRequired');
+    }
+    serviceLocked = false;
+    serviceSessionLost = false;
+    workspaceId = data['workspace'] as String?;
     _authenticated = data['authenticated'] == true;
     restoredJobs = data['jobs'] as List? ?? [];
     serverConcurrency = data['concurrency'] as int? ?? 4;
     serverSettingsRevision = data['settingsRevision'] as int? ?? 0;
     recoveredHistory = data['recovered'] == true;
+    _accessChanges.add(null);
+  }
+
+  @override
+  Future<void> unlockService(String key, {bool newWorkspace = false}) async =>
+      _acceptSession(
+        await call('/api/access/unlock', {
+          'key': key,
+          'newWorkspace': newWorkspace,
+        }),
+      );
+
+  @override
+  Future<void> lockService() async {
+    await call('/api/access/lock');
+    requireServiceAccess();
+  }
+
+  @override
+  void close() {
+    unawaited(_accessChanges.close());
+    super.close();
   }
 
   @override

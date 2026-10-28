@@ -9,6 +9,7 @@ import 'package:bili_downloader/app_controller.dart';
 import 'package:bili_downloader/core/download_queue.dart';
 import 'package:bili_downloader/core/download_job.dart';
 import 'package:bili_downloader/core/models.dart';
+import 'package:bili_downloader/core/remote_api.dart';
 import 'package:bili_downloader/ui/widgets.dart';
 
 import 'support.dart';
@@ -56,6 +57,50 @@ void main() {
       semantics.dispose();
     }
   });
+  testWidgets(
+    'service gate fits large text and hides the workspace from accessibility',
+    (tester) async {
+      final api = RemoteBiliApi()
+        ..serviceLocked = true
+        ..requiresServiceKey = true;
+      final c =
+          AppController(
+              api: api,
+              queue: DownloadQueue(CompletedRunner()),
+              store: MemoryStore(),
+            )
+            ..initializing = false
+            ..info = FixtureApi.video;
+      addTearDown(c.dispose);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final semantics = tester.ensureSemantics();
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      try {
+        for (final width in [320.0, 360.0, 900.0]) {
+          for (final locale in ['zh', 'en']) {
+            c.settings.locale = locale;
+            await tester.binding.setSurfaceSize(Size(width, 800));
+            await tester.pumpWidget(BiliDownloaderApp(controller: c));
+            c.clearError();
+            await tester.pumpAndSettle();
+            expect(
+              find.byKey(const ValueKey('service-access-key')),
+              findsOneWidget,
+            );
+            expect(find.byKey(const ValueKey('video-input')), findsNothing);
+            expect(
+              find.bySemanticsLabel(RegExp('测试视频 / Test video')),
+              findsNothing,
+            );
+            expect(tester.takeException(), isNull);
+          }
+        }
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
   testWidgets('locked keyring does not block first frame or late login', (
     tester,
   ) async {
@@ -80,6 +125,45 @@ void main() {
     store.pendingCookies.complete({'SESSDATA': 'stale-session'});
     await tester.pump();
     expect(c.api.cookies['SESSDATA'], 'new-session');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('service locking retains a draft and closes private dialogs', (
+    tester,
+  ) async {
+    final api = RemoteBiliApi()
+      ..requiresServiceKey = true
+      ..workspaceId = List.filled(64, 'a').join();
+    final c = AppController(
+      api: api,
+      queue: DownloadQueue(CompletedRunner()),
+      store: MemoryStore(),
+    )..initializing = false;
+    addTearDown(c.dispose);
+    await tester.pumpWidget(BiliDownloaderApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('video-input')), 'av2');
+    unawaited(
+      showDialog<void>(
+        context: tester.element(find.byKey(const ValueKey('video-input'))),
+        builder: (_) => const AlertDialog(title: Text('Private QR dialog')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    api.requireServiceAccess();
+    await tester.pumpAndSettle();
+    expect(find.text('Private QR dialog'), findsNothing);
+    expect(find.byKey(const ValueKey('video-input')), findsNothing);
+    api.serviceLocked = false;
+    c.clearError();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('video-input')))
+          .controller!
+          .text,
+      'av2',
+    );
     expect(tester.takeException(), isNull);
   });
 
