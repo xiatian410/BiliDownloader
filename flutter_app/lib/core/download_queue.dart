@@ -12,6 +12,7 @@ import 'execution_host.dart';
 class DownloadQueue extends TaskQueue {
   DownloadQueue(this.runner, {this.maxConcurrent = 4, this.executionHost}) {
     executionHost?.onPause = (reason) {
+      if (_closed) return;
       for (final job in jobs.where((j) => j.canPause).toList()) {
         pause(job);
         if (reason != null) job.error = AppFailure(reason);

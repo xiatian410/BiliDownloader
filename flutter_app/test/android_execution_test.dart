@@ -24,7 +24,16 @@ void main() {
     messenger.handlePlatformMessage(
       channel.name,
       const StandardMethodCodec().encodeMethodCall(MethodCall('pause', reason)),
-      (ByteData? _) => done.complete(),
+      (ByteData? response) {
+        try {
+          if (response != null) {
+            const StandardMethodCodec().decodeEnvelope(response);
+          }
+          done.complete();
+        } catch (e, stack) {
+          done.completeError(e, stack);
+        }
+      },
     );
     await done.future;
     await tick();
@@ -188,4 +197,26 @@ void main() {
       expect(calls.where((c) => c == 'stop'), hasLength(1));
     },
   );
+  test('late native pause is ignored while disposed queue finishes its checkpoint', () async {
+    final store = MemoryStore();
+    await queue.restore(store);
+    final writing = Completer<void>();
+    final commit = Completer<void>();
+    store.beforeWrite = () async {
+      if (!writing.isCompleted) writing.complete();
+      await commit.future;
+    };
+    await queue.add([job(1)]);
+    await writing.future;
+    queue.dispose();
+    try {
+      await nativePause('backgroundExpired');
+      expect(runner.started, isEmpty);
+    } finally {
+      commit.complete();
+    }
+    await queue.close();
+    // tearDown owns its own empty queue; the disposed instance stays disposed.
+    queue = DownloadQueue(runner);
+  });
 }
